@@ -29,6 +29,7 @@ class _EditorGridViewState extends State<EditorGridView> {
   double _scale = 1;
   Offset _offset = Offset.zero;
   Size _viewportSize = Size.zero;
+  String? _lastGridKey;
 
   bool _isPaintingStroke = false;
   bool _isViewportGesture = false;
@@ -180,8 +181,16 @@ class _EditorGridViewState extends State<EditorGridView> {
 
   void _scheduleClampIfNeeded(Size viewportSize) {
     _viewportSize = viewportSize;
-    final clampedOffset = _clampOffset(_offset, _scale, viewportSize);
-    if (clampedOffset == _offset) {
+
+    final gridKey =
+        '${widget.state.gridSize.width}x${widget.state.gridSize.height}';
+    final isNewGrid = _lastGridKey != gridKey;
+    _lastGridKey = gridKey;
+
+    final targetOffset = isNewGrid
+        ? _centeredOffset(_scale, viewportSize)
+        : _clampOffset(_offset, _scale, viewportSize);
+    if (targetOffset == _offset) {
       return;
     }
 
@@ -190,13 +199,22 @@ class _EditorGridViewState extends State<EditorGridView> {
         return;
       }
       setState(() {
-        _offset = _clampOffset(_offset, _scale, _viewportSize);
+        _offset = targetOffset;
       });
     });
   }
 
   Offset _scenePositionFromViewport(Offset viewportPosition) {
     return (viewportPosition - _offset) / _scale;
+  }
+
+  Offset _centeredOffset(double scale, Size viewportSize) {
+    final contentWidth = widget.state.gridSize.width * _cellSize * scale;
+    final contentHeight = widget.state.gridSize.height * _cellSize * scale;
+    return Offset(
+      (viewportSize.width - contentWidth) / 2,
+      (viewportSize.height - contentHeight) / 2,
+    );
   }
 
   Offset _clampOffset(Offset offset, double scale, Size viewportSize) {
@@ -217,16 +235,18 @@ class _EditorGridViewState extends State<EditorGridView> {
     );
   }
 
+  // Center-based clamp inspired by the old game camera: the viewport center
+  // (in scene coordinates) must stay within the board extent. This lets the
+  // board overshift so empty space shows near an edge, but it can never move
+  // so far that it leaves the screen.
   double _clampAxisOffset({
     required double offset,
     required double contentExtent,
     required double viewportExtent,
   }) {
-    if (contentExtent <= viewportExtent) {
-      return (viewportExtent - contentExtent) / 2;
-    }
-
-    return offset.clamp(viewportExtent - contentExtent, 0);
+    final maxOffset = viewportExtent / 2;
+    final minOffset = viewportExtent / 2 - contentExtent;
+    return offset.clamp(minOffset, maxOffset);
   }
 
   int? _indexFromViewportPosition(Offset position) {
