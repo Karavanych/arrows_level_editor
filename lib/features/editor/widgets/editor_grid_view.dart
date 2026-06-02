@@ -1,7 +1,8 @@
 import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
-class EditorGridView extends StatelessWidget {
+class EditorGridView extends StatefulWidget {
   const EditorGridView({
     super.key,
     required this.state,
@@ -15,84 +16,253 @@ class EditorGridView extends StatelessWidget {
   final ValueChanged<int> onCellDrag;
   final VoidCallback onStrokeEnd;
 
+  @override
+  State<EditorGridView> createState() => _EditorGridViewState();
+}
+
+class _EditorGridViewState extends State<EditorGridView> {
   static const double _cellSize = 48;
+  static const double _minZoom = 0.5;
+  static const double _maxZoom = 2.2;
+  static const double _wheelZoomStep = 0.0015;
+
+  double _scale = 1;
+  Offset _offset = Offset.zero;
+  Size _viewportSize = Size.zero;
+
+  bool _isPaintingStroke = false;
+  bool _isViewportGesture = false;
+  double _gestureStartScale = 1;
+  Offset _gestureStartSceneFocal = Offset.zero;
+  double _panZoomStartScale = 1;
+  Offset _panZoomStartSceneFocal = Offset.zero;
 
   @override
   Widget build(BuildContext context) {
-    final width = state.gridSize.width;
-    final height = state.gridSize.height;
+    final boardWidth = widget.state.gridSize.width * _cellSize;
+    final boardHeight = widget.state.gridSize.height * _cellSize;
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: SingleChildScrollView(
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (details) {
-            final index = _indexFromLocalPosition(details.localPosition);
-            if (index != null) {
-              onStrokeStart(index);
-              onStrokeEnd();
-            }
-          },
-          onPanStart: (details) {
-            final index = _indexFromLocalPosition(details.localPosition);
-            if (index != null) {
-              onStrokeStart(index);
-            }
-          },
-          onPanUpdate: (details) {
-            final index = _indexFromLocalPosition(details.localPosition);
-            if (index != null) {
-              onCellDrag(index);
-            }
-          },
-          onPanEnd: (_) => onStrokeEnd(),
-          onPanCancel: onStrokeEnd,
-          child: SizedBox(
-            width: width * _cellSize,
-            height: height * _cellSize,
-            child: GridView.builder(
-              itemCount: state.cells.length,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: width,
-                childAspectRatio: 1,
-              ),
-              itemBuilder: (context, index) {
-                final cell = state.cells[index];
-                final isSelected = state.selectedCellIndex == index;
-                return DecoratedBox(
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: isSelected ? Colors.indigo : Colors.black26,
-                      width: isSelected ? 2 : 1,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
+        _scheduleClampIfNeeded(viewportSize);
+
+        final transform = Matrix4.identity()
+          ..setEntry(0, 0, _scale)
+          ..setEntry(1, 1, _scale)
+          ..setEntry(0, 3, _offset.dx)
+          ..setEntry(1, 3, _offset.dy);
+
+        return ClipRect(
+          child: SizedBox.expand(
+            child: Listener(
+              onPointerSignal: _handlePointerSignal,
+              onPointerPanZoomStart: _handlePointerPanZoomStart,
+              onPointerPanZoomUpdate: _handlePointerPanZoomUpdate,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onScaleStart: _handleScaleStart,
+                onScaleUpdate: _handleScaleUpdate,
+                onScaleEnd: _handleScaleEnd,
+                child: Transform(
+                  transform: transform,
+                  alignment: Alignment.topLeft,
+                  transformHitTests: false,
+                  child: SizedBox(
+                    width: boardWidth,
+                    height: boardHeight,
+                    child: CustomPaint(
+                      painter: _GridPainter(
+                        state: widget.state,
+                        cellSize: _cellSize,
+                        visibleScene: _visibleSceneRect(viewportSize),
+                      ),
                     ),
-                    color: cell.paintColor ?? Colors.white,
                   ),
-                  child: Stack(
-                    children: [
-                      if (cell.isInactive) const _InactiveOverlay(),
-                      if (cell.hasStartMarker) const _StartMarkerOverlay(),
-                    ],
-                  ),
-                );
-              },
+                ),
+              ),
             ),
           ),
-        ),
+        );
+      },
+    );
+  }
+
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) {
+      return;
+    }
+
+    final factor = (1 - event.scrollDelta.dy * _wheelZoomStep).clamp(
+      0.85,
+      1.15,
+    );
+    _zoomAt(event.localPosition, _scale * factor);
+  }
+
+  void _handlePointerPanZoomStart(PointerPanZoomStartEvent event) {
+    _endPaintStrokeIfNeeded();
+    _panZoomStartScale = _scale;
+    _panZoomStartSceneFocal = _scenePositionFromViewport(event.localPosition);
+  }
+
+  void _handlePointerPanZoomUpdate(PointerPanZoomUpdateEvent event) {
+    final nextScale = (_panZoomStartScale * event.scale).clamp(
+      _minZoom,
+      _maxZoom,
+    );
+    final nextOffset =
+        event.localPosition - _panZoomStartSceneFocal * nextScale + event.pan;
+
+    setState(() {
+      _scale = nextScale;
+      _offset = _clampOffset(nextOffset, _scale, _viewportSize);
+    });
+  }
+
+  void _handleScaleStart(ScaleStartDetails details) {
+    _gestureStartScale = _scale;
+    _gestureStartSceneFocal = _scenePositionFromViewport(
+      details.localFocalPoint,
+    );
+    _isViewportGesture = details.pointerCount > 1;
+
+    if (_isViewportGesture) {
+      _endPaintStrokeIfNeeded();
+      return;
+    }
+
+    final index = _indexFromViewportPosition(details.localFocalPoint);
+    if (index != null) {
+      _isPaintingStroke = true;
+      widget.onStrokeStart(index);
+    }
+  }
+
+  void _handleScaleUpdate(ScaleUpdateDetails details) {
+    if (details.pointerCount > 1 || _isViewportGesture) {
+      _isViewportGesture = true;
+      _endPaintStrokeIfNeeded();
+
+      final nextScale = (_gestureStartScale * details.scale).clamp(
+        _minZoom,
+        _maxZoom,
+      );
+      final nextOffset =
+          details.localFocalPoint - _gestureStartSceneFocal * nextScale;
+
+      setState(() {
+        _scale = nextScale;
+        _offset = _clampOffset(nextOffset, _scale, _viewportSize);
+      });
+      return;
+    }
+
+    final index = _indexFromViewportPosition(details.localFocalPoint);
+    if (index != null) {
+      if (!_isPaintingStroke) {
+        _isPaintingStroke = true;
+        widget.onStrokeStart(index);
+      } else {
+        widget.onCellDrag(index);
+      }
+    }
+  }
+
+  void _handleScaleEnd(ScaleEndDetails details) {
+    _endPaintStrokeIfNeeded();
+    _isViewportGesture = false;
+  }
+
+  void _zoomAt(Offset viewportFocalPoint, double targetScale) {
+    final nextScale = targetScale.clamp(_minZoom, _maxZoom);
+    final sceneFocalPoint = _scenePositionFromViewport(viewportFocalPoint);
+    final nextOffset = viewportFocalPoint - sceneFocalPoint * nextScale;
+
+    setState(() {
+      _scale = nextScale;
+      _offset = _clampOffset(nextOffset, _scale, _viewportSize);
+    });
+  }
+
+  void _endPaintStrokeIfNeeded() {
+    if (!_isPaintingStroke) {
+      return;
+    }
+
+    widget.onStrokeEnd();
+    _isPaintingStroke = false;
+  }
+
+  void _scheduleClampIfNeeded(Size viewportSize) {
+    _viewportSize = viewportSize;
+    final clampedOffset = _clampOffset(_offset, _scale, viewportSize);
+    if (clampedOffset == _offset) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _offset = _clampOffset(_offset, _scale, _viewportSize);
+      });
+    });
+  }
+
+  Rect _visibleSceneRect(Size viewportSize) {
+    final topLeft = _scenePositionFromViewport(Offset.zero);
+    final bottomRight = _scenePositionFromViewport(
+      Offset(viewportSize.width, viewportSize.height),
+    );
+    return Rect.fromPoints(topLeft, bottomRight);
+  }
+
+  Offset _scenePositionFromViewport(Offset viewportPosition) {
+    return (viewportPosition - _offset) / _scale;
+  }
+
+  Offset _clampOffset(Offset offset, double scale, Size viewportSize) {
+    final contentWidth = widget.state.gridSize.width * _cellSize * scale;
+    final contentHeight = widget.state.gridSize.height * _cellSize * scale;
+
+    return Offset(
+      _clampAxisOffset(
+        offset: offset.dx,
+        contentExtent: contentWidth,
+        viewportExtent: viewportSize.width,
+      ),
+      _clampAxisOffset(
+        offset: offset.dy,
+        contentExtent: contentHeight,
+        viewportExtent: viewportSize.height,
       ),
     );
   }
 
-  int? _indexFromLocalPosition(Offset position) {
-    final width = state.gridSize.width;
-    final height = state.gridSize.height;
-    if (position.dx < 0 || position.dy < 0) {
+  double _clampAxisOffset({
+    required double offset,
+    required double contentExtent,
+    required double viewportExtent,
+  }) {
+    if (contentExtent <= viewportExtent) {
+      return (viewportExtent - contentExtent) / 2;
+    }
+
+    return offset.clamp(viewportExtent - contentExtent, 0);
+  }
+
+  int? _indexFromViewportPosition(Offset position) {
+    final scenePosition = _scenePositionFromViewport(position);
+    final width = widget.state.gridSize.width;
+    final height = widget.state.gridSize.height;
+    if (scenePosition.dx < 0 || scenePosition.dy < 0) {
       return null;
     }
 
-    final column = position.dx ~/ _cellSize;
-    final row = position.dy ~/ _cellSize;
+    final column = scenePosition.dx ~/ _cellSize;
+    final row = scenePosition.dy ~/ _cellSize;
     if (column < 0 || column >= width || row < 0 || row >= height) {
       return null;
     }
@@ -101,68 +271,100 @@ class EditorGridView extends StatelessWidget {
   }
 }
 
-class _InactiveOverlay extends StatelessWidget {
-  const _InactiveOverlay();
+class _GridPainter extends CustomPainter {
+  _GridPainter({
+    required this.state,
+    required this.cellSize,
+    required this.visibleScene,
+  });
 
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Container(color: Colors.black.withValues(alpha: 0.12)),
-        CustomPaint(painter: _CrossPainter()),
-      ],
-    );
-  }
-}
+  final EditorState state;
+  final double cellSize;
+  final Rect visibleScene;
 
-class _StartMarkerOverlay extends StatelessWidget {
-  const _StartMarkerOverlay();
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        width: 18,
-        height: 18,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.black87, width: 2),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black26,
-              blurRadius: 2,
-              offset: Offset(0, 1),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CrossPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
+    final width = state.gridSize.width;
+    final height = state.gridSize.height;
+
+    final backgroundPaint = Paint()..color = Colors.white;
+    canvas.drawRect(Offset.zero & size, backgroundPaint);
+
+    final firstColumn = (visibleScene.left / cellSize).floor().clamp(
+      0,
+      width - 1,
+    );
+    final lastColumn = (visibleScene.right / cellSize).ceil().clamp(0, width);
+    final firstRow = (visibleScene.top / cellSize).floor().clamp(0, height - 1);
+    final lastRow = (visibleScene.bottom / cellSize).ceil().clamp(0, height);
+
+    final inactiveFillPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.12);
+    final crossPaint = Paint()
       ..color = Colors.black54
       ..strokeWidth = 3
       ..strokeCap = StrokeCap.round;
-    const inset = 10.0;
-    canvas
-      ..drawLine(
-        const Offset(inset, inset),
-        Offset(size.width - inset, size.height - inset),
-        paint,
-      )
-      ..drawLine(
-        Offset(size.width - inset, inset),
-        Offset(inset, size.height - inset),
-        paint,
-      );
+    final markerFillPaint = Paint()..color = Colors.white;
+    final markerBorderPaint = Paint()
+      ..color = Colors.black87
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    final gridLinePaint = Paint()
+      ..color = Colors.black26
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    final selectedPaint = Paint()
+      ..color = Colors.indigo
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+
+    for (var row = firstRow; row < lastRow; row += 1) {
+      for (var column = firstColumn; column < lastColumn; column += 1) {
+        final index = (row * width) + column;
+        final cell = state.cells[index];
+        final rect = Rect.fromLTWH(
+          column * cellSize,
+          row * cellSize,
+          cellSize,
+          cellSize,
+        );
+
+        if (cell.paintColor != null) {
+          canvas.drawRect(rect, Paint()..color = cell.paintColor!);
+        }
+
+        if (cell.isInactive) {
+          canvas.drawRect(rect, inactiveFillPaint);
+          const inset = 10.0;
+          canvas
+            ..drawLine(
+              rect.topLeft + const Offset(inset, inset),
+              rect.bottomRight - const Offset(inset, inset),
+              crossPaint,
+            )
+            ..drawLine(
+              rect.topRight + const Offset(-inset, inset),
+              rect.bottomLeft + const Offset(inset, -inset),
+              crossPaint,
+            );
+        }
+
+        if (cell.hasStartMarker) {
+          canvas
+            ..drawCircle(rect.center, 9, markerFillPaint)
+            ..drawCircle(rect.center, 9, markerBorderPaint);
+        }
+
+        final isSelected = state.selectedCellIndex == index;
+        canvas.drawRect(rect, isSelected ? selectedPaint : gridLinePaint);
+      }
+    }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _GridPainter oldDelegate) {
+    return oldDelegate.state != state ||
+        oldDelegate.cellSize != cellSize ||
+        oldDelegate.visibleScene != visibleScene;
+  }
 }
