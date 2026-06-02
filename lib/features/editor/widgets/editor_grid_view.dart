@@ -39,19 +39,10 @@ class _EditorGridViewState extends State<EditorGridView> {
 
   @override
   Widget build(BuildContext context) {
-    final boardWidth = widget.state.gridSize.width * _cellSize;
-    final boardHeight = widget.state.gridSize.height * _cellSize;
-
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
         _scheduleClampIfNeeded(viewportSize);
-
-        final transform = Matrix4.identity()
-          ..setEntry(0, 0, _scale)
-          ..setEntry(1, 1, _scale)
-          ..setEntry(0, 3, _offset.dx)
-          ..setEntry(1, 3, _offset.dy);
 
         return ClipRect(
           child: SizedBox.expand(
@@ -64,20 +55,13 @@ class _EditorGridViewState extends State<EditorGridView> {
                 onScaleStart: _handleScaleStart,
                 onScaleUpdate: _handleScaleUpdate,
                 onScaleEnd: _handleScaleEnd,
-                child: Transform(
-                  transform: transform,
-                  alignment: Alignment.topLeft,
-                  transformHitTests: false,
-                  child: SizedBox(
-                    width: boardWidth,
-                    height: boardHeight,
-                    child: CustomPaint(
-                      painter: _GridPainter(
-                        state: widget.state,
-                        cellSize: _cellSize,
-                        visibleScene: _visibleSceneRect(viewportSize),
-                      ),
-                    ),
+                child: CustomPaint(
+                  size: Size.infinite,
+                  painter: _GridPainter(
+                    state: widget.state,
+                    cellSize: _cellSize,
+                    scale: _scale,
+                    offset: _offset,
                   ),
                 ),
               ),
@@ -211,14 +195,6 @@ class _EditorGridViewState extends State<EditorGridView> {
     });
   }
 
-  Rect _visibleSceneRect(Size viewportSize) {
-    final topLeft = _scenePositionFromViewport(Offset.zero);
-    final bottomRight = _scenePositionFromViewport(
-      Offset(viewportSize.width, viewportSize.height),
-    );
-    return Rect.fromPoints(topLeft, bottomRight);
-  }
-
   Offset _scenePositionFromViewport(Offset viewportPosition) {
     return (viewportPosition - _offset) / _scale;
   }
@@ -275,28 +251,37 @@ class _GridPainter extends CustomPainter {
   _GridPainter({
     required this.state,
     required this.cellSize,
-    required this.visibleScene,
+    required this.scale,
+    required this.offset,
   });
 
   final EditorState state;
   final double cellSize;
-  final Rect visibleScene;
+  final double scale;
+  final Offset offset;
 
   @override
   void paint(Canvas canvas, Size size) {
     final width = state.gridSize.width;
     final height = state.gridSize.height;
 
-    final backgroundPaint = Paint()..color = Colors.white;
-    canvas.drawRect(Offset.zero & size, backgroundPaint);
+    canvas
+      ..save()
+      ..translate(offset.dx, offset.dy)
+      ..scale(scale);
 
-    final firstColumn = (visibleScene.left / cellSize).floor().clamp(
-      0,
-      width - 1,
-    );
-    final lastColumn = (visibleScene.right / cellSize).ceil().clamp(0, width);
-    final firstRow = (visibleScene.top / cellSize).floor().clamp(0, height - 1);
-    final lastRow = (visibleScene.bottom / cellSize).ceil().clamp(0, height);
+    final boardRect = Rect.fromLTWH(0, 0, width * cellSize, height * cellSize);
+    canvas.drawRect(boardRect, Paint()..color = Colors.white);
+
+    final visibleLeft = -offset.dx / scale;
+    final visibleTop = -offset.dy / scale;
+    final visibleRight = (size.width - offset.dx) / scale;
+    final visibleBottom = (size.height - offset.dy) / scale;
+
+    final firstColumn = (visibleLeft / cellSize).floor().clamp(0, width - 1);
+    final lastColumn = (visibleRight / cellSize).ceil().clamp(0, width);
+    final firstRow = (visibleTop / cellSize).floor().clamp(0, height - 1);
+    final lastRow = (visibleBottom / cellSize).ceil().clamp(0, height);
 
     final inactiveFillPaint = Paint()
       ..color = Colors.black.withValues(alpha: 0.12);
@@ -359,12 +344,15 @@ class _GridPainter extends CustomPainter {
         canvas.drawRect(rect, isSelected ? selectedPaint : gridLinePaint);
       }
     }
+
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant _GridPainter oldDelegate) {
     return oldDelegate.state != state ||
         oldDelegate.cellSize != cellSize ||
-        oldDelegate.visibleScene != visibleScene;
+        oldDelegate.scale != scale ||
+        oldDelegate.offset != offset;
   }
 }
