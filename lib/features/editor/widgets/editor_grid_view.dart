@@ -22,7 +22,7 @@ class EditorGridView extends StatefulWidget {
 
 class _EditorGridViewState extends State<EditorGridView> {
   static const double _cellSize = 48;
-  static const double _minZoom = 0.5;
+  static const double _minZoom = 0.2;
   static const double _maxZoom = 2.2;
   static const double _wheelZoomStep = 0.0015;
 
