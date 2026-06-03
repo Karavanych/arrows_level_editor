@@ -9,12 +9,18 @@ class EditorGridView extends StatefulWidget {
     required this.onStrokeStart,
     required this.onCellDrag,
     required this.onStrokeEnd,
+    required this.onEraseStrokeStart,
+    required this.onEraseCellDrag,
+    required this.onEraseStrokeEnd,
   });
 
   final EditorState state;
   final ValueChanged<int> onStrokeStart;
   final ValueChanged<int> onCellDrag;
   final VoidCallback onStrokeEnd;
+  final ValueChanged<int> onEraseStrokeStart;
+  final ValueChanged<int> onEraseCellDrag;
+  final VoidCallback onEraseStrokeEnd;
 
   @override
   State<EditorGridView> createState() => _EditorGridViewState();
@@ -32,6 +38,8 @@ class _EditorGridViewState extends State<EditorGridView> {
   String? _lastGridKey;
 
   bool _isPaintingStroke = false;
+  bool _isErasingStroke = false;
+  int? _erasePointerId;
   bool _isViewportGesture = false;
   double _gestureStartScale = 1;
   Offset _gestureStartSceneFocal = Offset.zero;
@@ -48,11 +56,16 @@ class _EditorGridViewState extends State<EditorGridView> {
         return ClipRect(
           child: SizedBox.expand(
             child: Listener(
+              onPointerDown: _handlePointerDown,
+              onPointerMove: _handlePointerMove,
+              onPointerUp: _handlePointerUp,
+              onPointerCancel: _handlePointerCancel,
               onPointerSignal: _handlePointerSignal,
               onPointerPanZoomStart: _handlePointerPanZoomStart,
               onPointerPanZoomUpdate: _handlePointerPanZoomUpdate,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
+                onSecondaryTapDown: (_) {},
                 onScaleStart: _handleScaleStart,
                 onScaleUpdate: _handleScaleUpdate,
                 onScaleEnd: _handleScaleEnd,
@@ -87,9 +100,53 @@ class _EditorGridViewState extends State<EditorGridView> {
 
   void _handlePointerPanZoomStart(PointerPanZoomStartEvent event) {
     _endPaintStrokeIfNeeded();
+    _endEraseStrokeIfNeeded();
     _panZoomStartScale = _scale;
     _panZoomStartSceneFocal = _scenePositionFromViewport(event.localPosition);
   }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    if (!_hasSecondaryButton(event.buttons)) {
+      return;
+    }
+
+    final index = _indexFromViewportPosition(event.localPosition);
+    if (index == null) {
+      return;
+    }
+
+    _erasePointerId = event.pointer;
+    _isErasingStroke = true;
+    _endPaintStrokeIfNeeded();
+    widget.onEraseStrokeStart(index);
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    if (!_isErasingStroke || event.pointer != _erasePointerId) {
+      return;
+    }
+
+    final index = _indexFromViewportPosition(event.localPosition);
+    if (index != null) {
+      widget.onEraseCellDrag(index);
+    }
+  }
+
+  void _handlePointerUp(PointerUpEvent event) {
+    if (event.pointer != _erasePointerId) {
+      return;
+    }
+    _endEraseStrokeIfNeeded();
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    if (event.pointer != _erasePointerId) {
+      return;
+    }
+    _endEraseStrokeIfNeeded();
+  }
+
+  bool _hasSecondaryButton(int buttons) => buttons & kSecondaryMouseButton != 0;
 
   void _handlePointerPanZoomUpdate(PointerPanZoomUpdateEvent event) {
     final nextScale = (_panZoomStartScale * event.scale).clamp(
@@ -106,6 +163,11 @@ class _EditorGridViewState extends State<EditorGridView> {
   }
 
   void _handleScaleStart(ScaleStartDetails details) {
+    if (_isErasingStroke) {
+      _endPaintStrokeIfNeeded();
+      return;
+    }
+
     _gestureStartScale = _scale;
     _gestureStartSceneFocal = _scenePositionFromViewport(
       details.localFocalPoint,
@@ -125,6 +187,11 @@ class _EditorGridViewState extends State<EditorGridView> {
   }
 
   void _handleScaleUpdate(ScaleUpdateDetails details) {
+    if (_isErasingStroke) {
+      _endPaintStrokeIfNeeded();
+      return;
+    }
+
     if (details.pointerCount > 1 || _isViewportGesture) {
       _isViewportGesture = true;
       _endPaintStrokeIfNeeded();
@@ -155,6 +222,9 @@ class _EditorGridViewState extends State<EditorGridView> {
   }
 
   void _handleScaleEnd(ScaleEndDetails details) {
+    if (_isErasingStroke) {
+      return;
+    }
     _endPaintStrokeIfNeeded();
     _isViewportGesture = false;
   }
@@ -177,6 +247,16 @@ class _EditorGridViewState extends State<EditorGridView> {
 
     widget.onStrokeEnd();
     _isPaintingStroke = false;
+  }
+
+  void _endEraseStrokeIfNeeded() {
+    if (!_isErasingStroke) {
+      return;
+    }
+
+    widget.onEraseStrokeEnd();
+    _isErasingStroke = false;
+    _erasePointerId = null;
   }
 
   void _scheduleClampIfNeeded(Size viewportSize) {

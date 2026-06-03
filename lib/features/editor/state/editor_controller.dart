@@ -6,6 +6,7 @@ class EditorController extends ChangeNotifier {
 
   EditorState _state;
   final Set<int> _strokeTouchedCells = {};
+  final Set<int> _eraseStrokeTouchedCells = {};
 
   EditorState get state => _state;
 
@@ -47,6 +48,40 @@ class EditorController extends ChangeNotifier {
 
   void endStroke() {
     _strokeTouchedCells.clear();
+  }
+
+  void beginEraseStroke(int index) {
+    _eraseStrokeTouchedCells.clear();
+    eraseCell(index);
+  }
+
+  void eraseCell(int index) {
+    if (!_eraseStrokeTouchedCells.add(index)) {
+      return;
+    }
+    clearCell(index);
+  }
+
+  void endEraseStroke() {
+    _eraseStrokeTouchedCells.clear();
+  }
+
+  void clearCell(int index) {
+    if (index < 0 || index >= _state.cells.length) {
+      return;
+    }
+
+    final current = _state.cells[index];
+    if (current.paintColor == null &&
+        !current.isInactive &&
+        !current.hasStartMarker) {
+      return;
+    }
+
+    final nextCells = List<EditorCell>.from(_state.cells);
+    nextCells[index] = const EditorCell();
+    _state = _state.copyWith(cells: nextCells, selectedCellIndex: index);
+    notifyListeners();
   }
 
   void selectCell(int index) {
