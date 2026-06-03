@@ -1,6 +1,6 @@
 # PROJECT ARCHITECTURE INDEX
 
-Standalone Flutter desktop-first prototype for a paint-like arrows level grid editor. No save/export, no persistence, no external packages beyond Flutter SDK defaults.
+Standalone Flutter desktop-first prototype for a paint-like arrows level grid editor. Editor-first workflow: no save/export format locked yet, no runtime puzzle logic, no external packages beyond Flutter SDK defaults.
 
 ## Entry Point
 
@@ -8,119 +8,182 @@ Standalone Flutter desktop-first prototype for a paint-like arrows level grid ed
 - Role: Application bootstrap
 - Responsibilities:
   - Call `runApp` with `ArrowsLevelEditorApp`
-- Notes: No window manager or platform-specific startup logic
 
 ## App Configuration
 
 **lib/app/app.dart** — `ArrowsLevelEditorApp`
 - Role: Root app shell
 - Responsibilities:
-  - Configure `MaterialApp` (title, theme, home)
-  - Material 3 theme via `ColorScheme.fromSeed` (indigo)
+  - Configure `MaterialApp`
   - Set `EditorScreen` as `home`
-- Notes: `debugShowCheckedModeBanner` disabled
+  - Provide base Material theme
+- Notes: no app-specific routing or service layer
 
 **pubspec.yaml**
-- Role: Package manifest and dependency constraints
+- Role: Package manifest
 - Responsibilities:
-  - Package name `arrows_level_editor`
-  - Dart SDK `^3.10.0` (compatible with Flutter 3.38.x / Dart 3.10.4)
-  - Dependencies: `flutter`, `cupertino_icons` only
-  - Dev: `flutter_test`, `flutter_lints`
-- Notes: No assets, fonts, or third-party editor packages declared
+  - Flutter app metadata and SDK constraints
+  - Only lightweight default deps: `flutter`, `cupertino_icons`
+- Notes: no third-party color picker, persistence, or state-management packages
 
-## Plan / Status Document
+## Plan / Intent
 
 **EDITOR_PLAN.md**
-- Role: Product and build plan (v0.1)
+- Role: Product and build plan
 - Responsibilities:
-  - Defines editor-first goals, V1 scope, editing modes, color system, build stages, success criteria
-  - Documents open design question: cell-paint vs line-as-object model
-  - Recommends Flutter for tool-like UI; defers save format decision
-- Notes: Authoritative intent doc; not all “nice to have” items are implemented in code yet
+  - Documents editor-first approach
+  - Captures V1 UX rules, tool behavior, palette direction, and deferred save-format decision
+  - Notes key interaction rules such as right-click clear and Flutter as the chosen stack
+- Notes: authoritative planning doc; implementation has already advanced beyond early plan snapshots
 
 ## Core Models / State
 
 **lib/features/editor/model/editor_models.dart**
-- Role: Editor domain types and immutable aggregate state
+- Role: Immutable editor domain and history models
 - Responsibilities:
-  - `EditorGridSize` — width/height of the field
-  - `EditorCell` — per-cell `paintColor`, `isInactive`, `hasStartMarker` with `copyWith`
-  - `EditorTool` enum — `paint`, `inactive`, `startMarker`, `erase`, `select`
-  - `EditorState` — grid size, flat `cells` list, selected color/tool, preset `paletteColors`, optional `selectedCellIndex`
-  - `EditorState.initial` — default 10×10 empty grid and built-in palette
-- Notes: Cell-based model only; no line objects or route validation
+  - `EditorGridSize` — width/height
+  - `EditorCell` — per-cell `paintColor`, `isInactive`, `hasStartMarker`
+  - `CellChange` — one cell history diff with `x`, `y`, `beforeCell`, `afterCell`
+  - `EditorStrokeChange` — one committed stroke history entry
+  - `EditorTool` enum — `paint`, `inactive`, `startMarker`, `erase`
+  - `EditorState` — grid size, flat cells, selected color, selected tool, fixed palette, optional selected cell
+- Notes:
+  - `select` tool has been removed
+  - Palette is fixed to 24 colors
+  - State is still cell-based only; no line objects yet
 
 **lib/features/editor/state/editor_controller.dart** — `EditorController`
-- Role: Mutable editor logic (`ChangeNotifier`)
+- Role: Mutable editor logic via `ChangeNotifier`
 - Responsibilities:
   - Hold authoritative `EditorState`
-  - `generateGrid` — recreate cells on Generate (clamp 1–200, clear selection)
-  - `selectTool`, `selectColor`
-  - Stroke API: `beginStroke`, `touchCell`, `endStroke` with per-stroke dedup set
-  - `updateCell` — apply current tool to a cell index
-  - `selectCell` — used from select tool path
-- Notes: No undo/redo, no file I/O, no palette mutation API; does not own viewport zoom/pan
+  - Grid lifecycle: `generateGrid`
+  - Tool/color selection: `selectTool`, `selectColor`, `selectColorAndActivatePaint`
+  - Stroke lifecycle:
+    - left/edit stroke: `beginStroke`, `touchCell`, `endStroke`
+    - right/erase stroke: `beginEraseStroke`, `eraseCell`, `endEraseStroke`
+  - Cell mutation:
+    - `updateCell`
+    - `clearCell`
+    - `selectCell`
+  - Undo/redo:
+    - `undo()`
+    - `redo()`
+    - history depth capped to 3 undo + 3 redo entries
+- Behavior rules currently enforced:
+  - `paint` only applies to empty cells
+  - `inactive` only applies to empty cells and produces a clean inactive cell
+  - right-click clear fully resets the cell
+  - `startMarker` is applied through its own tool path
+  - each history step is one completed mouse stroke, not each touched cell
 
-## Features
+## Main Screen / Interaction Orchestration
 
 **lib/features/editor/editor_screen.dart** — `EditorScreen`
-- Role: Main editor UI and layout orchestration
+- Role: Main editor UI and keyboard orchestration
 - Responsibilities:
-  - Own `EditorController` and width/height `TextEditingController`s
-  - Three-column layout: left toolbar (280px), center canvas, right debug panel (250px)
-  - Wire Generate to `generateGrid`
-  - Tool selector (`ChoiceChip` per `EditorTool`)
-  - Color palette taps → `selectColor`
-  - Pass stroke callbacks into `EditorGridView`
-  - Debug / state preview panel (counts, selected cell, truncated edited-cells preview)
+  - Own `EditorController`
+  - Own width/height text controllers
+  - Own editor `FocusNode`
+  - Layout:
+    - left tool/palette panel
+    - center grid canvas
+    - right debug/state panel
+  - Wire Generate button to `generateGrid`
+  - Render tool chips for `paint`, `inactive`, `startMarker`, `erase`
+  - Render 24-color palette as a 4x6 grid
+  - Palette click:
+    - sets selected color
+    - auto-activates `paint`
+  - Handle direct desktop keyboard shortcuts on the editor focus node:
+    - macOS: `Cmd+Z`, `Cmd+Shift+Z`
+    - Windows/Linux: `Ctrl+Z`, `Ctrl+Shift+Z`, `Ctrl+Y`
 - Notes:
-  - Left panel uses `SingleChildScrollView` for toolbar only; center grid does not scroll
-  - “Add/Edit Color” button is disabled with TODO for color picker
-  - UI helpers (`_toolLabel`, `_colorLabel`, `_statePreview`) live in this file
+  - Shortcut handling is implemented directly in `onKeyEvent`, not via `Shortcuts/Actions`
+  - Ignores editor-level undo/redo while an `EditableText` has primary focus
+  - Grid interaction explicitly requests editor focus so shortcuts work after canvas use
 
-## Widgets / UI
+## Grid Canvas / Viewport / Pointer Logic
 
 **lib/features/editor/widgets/editor_grid_view.dart** — `EditorGridView` + `_GridPainter`
-- Role: Single-surface grid canvas with unified viewport navigation and painting
+- Role: Single-surface interactive board canvas
 - Responsibilities:
-  - Render the full board via one `CustomPaint` / `_GridPainter` (cells, borders, inactive cross, start marker, selection) — no `GridView`, no nested scroll for navigation
-  - Viewport state: `_scale`, `_offset`, `_viewportSize`; transform applied inside painter (`canvas.translate` / `canvas.scale`)
-  - Zoom limits: min `0.2`, max `2.2`; wheel step `_wheelZoomStep`
-  - Input:
-    - Desktop: `PointerScrollEvent` for mouse wheel zoom at cursor
-    - macOS trackpad: `PointerPanZoomStart` / `PointerPanZoomUpdate` for pinch + pan
-    - Mobile/tablet: `GestureDetector` scale gestures (multi-touch pinch/pan)
-    - Single pointer: paint/drag via `onStrokeStart` / `onCellDrag` / `onStrokeEnd`
-    - Multi-pointer: viewport navigation only
-  - Hit-test: `_indexFromViewportPosition` maps viewport coords → scene → cell index (same math as paint transform)
-  - Pan clamp: center-based model (`_clampAxisOffset`) — viewport center in scene coords stays within board `[0, boardSize]`; allows visible empty space near edges but board cannot leave the screen; not hard edge-pinned to viewport
-  - On grid size change (`Generate`): re-center board via `_centeredOffset` when `gridKey` changes
-  - Cull off-screen cells in painter using visible scene bounds
+  - Render cells, borders, inactive cross overlay, and start marker overlay via `CustomPaint`
+  - Maintain viewport transform:
+    - `_scale`
+    - `_offset`
+  - Support zoom/pan:
+    - mouse wheel zoom
+    - trackpad pan/zoom
+    - touch pinch/pan
+    - modifier-drag pan
+  - Support input modes:
+    - left drag => active tool stroke
+    - right drag => global full-cell clear
+    - `Ctrl`/`Cmd` + left/right drag => pan viewport
+  - Support field color picking:
+    - only in `paint` mode
+    - only on a true click on a painted cell
+    - no pick on drag, inactive cells, or other tools
+  - Recenter/clamp viewport when grid changes
 - Notes:
-  - Board background is white over full board rect in scene space (avoids gray viewport bleed on large grids)
-  - Gray `0xFFF5F5F5` is only the outer `EditorScreen` container around the canvas area
+  - Right-click erase has priority over the selected tool
+  - Color pick from field routes through `onColorPick`, which activates `paint`
+  - Uses one painter surface rather than a widget-per-cell grid
+
+## Current UX Rules Reflected In Code
+
+- Width/height are numeric inputs, applied by `Generate`
+- Palette is a fixed 24-color grid
+- Clicking a palette swatch also activates `paint`
+- `select` tool removed from UI and model
+- Right mouse button always fully clears cell state:
+  - paint color
+  - inactive flag
+  - start marker
+- `paint` and `inactive` do not overwrite occupied cells
+- To replace existing content, the user must clear first
+- `inactive` is a final cell state, not a visual overlay on top of paint
+- True-click on a painted field cell in `paint` mode picks that color
+- Undo/redo history is stroke-based and capped to 3 levels each
+
+## Debug / Inspection
+
+- Right-side panel shows:
+  - grid size
+  - selected tool
+  - selected color
+  - counts for painted / inactive / marker cells
+  - selected cell details
+  - compact internal preview of edited cells
+- This is currently part of normal prototype inspection, not gameplay logic
 
 ## Tests
 
 **test/widget_test.dart**
-- Role: Widget smoke test
-- Responsibilities:
-  - Pump `ArrowsLevelEditorApp`
-  - Assert presence of title, Generate, and State Preview labels
-- Notes: No interaction, zoom, or grid-editing coverage
+- Role: Basic widget smoke test scaffold
+- Notes: not yet a strong interaction regression suite for editor behavior
 
 ## Platform / Build Notes
 
-- Standard Flutter multi-platform scaffold (`android/`, `ios/`, `macos/`, `web/`, `windows/`, `linux/`) — generated boilerplate, not customized for editor logic
-- Target platforms per plan: macOS and Windows desktop-first; mobile possible later
-- Run: `flutter pub get` then `flutter run -d macos` (or other device)
-- **Not implemented:** save/export/import, undo/redo, custom color picker, line validation, connected-region detection
-- **Prototype status:** Stages 1–3, viewport navigation (zoom/pan), and partial Stage 4 from `EDITOR_PLAN.md`; Stage 5 (save format) not started
+- Standard Flutter multi-platform scaffold present: `android/`, `ios/`, `macos/`, `linux/`, `windows/`, `web/`
+- Current practical target: desktop-first, especially macOS and Windows
+- Mobile compatibility is a future-friendly goal, not a polished target yet
+- Run locally with `flutter run -d macos` or another Flutter device target
+
+## Not Implemented Yet
+
+- Final authoring/save format
+- Export/import pipeline
+- Runtime line-path object model
+- Puzzle validation rules
+- Dead-start detection
+- Persistent project files
+- Undo/redo UI buttons
+- Dedicated tests for pointer and keyboard interaction flows
 
 ## Source Layout Summary
 
-```
+```text
 lib/
   main.dart
   app/app.dart
