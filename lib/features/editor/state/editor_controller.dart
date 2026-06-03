@@ -112,7 +112,7 @@ class EditorController extends ChangeNotifier {
           isInactive: false,
         );
       case EditorTool.inactive:
-        updated = current.copyWith(isInactive: true);
+        updated = const EditorCell(isInactive: true);
       case EditorTool.startMarker:
         updated = current.copyWith(hasStartMarker: true);
       case EditorTool.erase:
