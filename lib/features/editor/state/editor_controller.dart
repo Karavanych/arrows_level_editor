@@ -44,6 +44,11 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void selectColorAndActivatePaint(Color color) {
+    _state = _state.copyWith(selectedColor: color, selectedTool: EditorTool.paint);
+    notifyListeners();
+  }
+
   void beginStroke(int index) {
     _strokeTouchedCells.clear();
     _beginHistoryStroke();

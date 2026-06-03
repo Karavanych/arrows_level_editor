@@ -243,7 +243,7 @@ class _EditorScreenState extends State<EditorScreen> {
           children: state.paletteColors.map((color) {
             final selected = state.selectedColor.toARGB32() == color.toARGB32();
             return InkWell(
-              onTap: () => _controller.selectColor(color),
+              onTap: () => _controller.selectColorAndActivatePaint(color),
               borderRadius: BorderRadius.circular(8),
               child: Container(
                 width: 32,
