@@ -1,6 +1,7 @@
 import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class EditorGridView extends StatefulWidget {
   const EditorGridView({
@@ -40,6 +41,9 @@ class _EditorGridViewState extends State<EditorGridView> {
   bool _isPaintingStroke = false;
   bool _isErasingStroke = false;
   int? _erasePointerId;
+  bool _isModifiedPanStroke = false;
+  int? _panPointerId;
+  Offset _panLastViewportPosition = Offset.zero;
   bool _isViewportGesture = false;
   double _gestureStartScale = 1;
   Offset _gestureStartSceneFocal = Offset.zero;
@@ -101,11 +105,21 @@ class _EditorGridViewState extends State<EditorGridView> {
   void _handlePointerPanZoomStart(PointerPanZoomStartEvent event) {
     _endPaintStrokeIfNeeded();
     _endEraseStrokeIfNeeded();
+    _endModifiedPanIfNeeded();
     _panZoomStartScale = _scale;
     _panZoomStartSceneFocal = _scenePositionFromViewport(event.localPosition);
   }
 
   void _handlePointerDown(PointerDownEvent event) {
+    if (_isPanModifierPressed() && _hasMousePaintOrEraseButton(event.buttons)) {
+      _endPaintStrokeIfNeeded();
+      _endEraseStrokeIfNeeded();
+      _isModifiedPanStroke = true;
+      _panPointerId = event.pointer;
+      _panLastViewportPosition = event.localPosition;
+      return;
+    }
+
     if (!_hasSecondaryButton(event.buttons)) {
       return;
     }
@@ -122,6 +136,24 @@ class _EditorGridViewState extends State<EditorGridView> {
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
+    if (_isModifiedPanStroke && event.pointer == _panPointerId) {
+      if (!_hasMousePaintOrEraseButton(event.buttons)) {
+        _endModifiedPanIfNeeded();
+        return;
+      }
+
+      final delta = event.localPosition - _panLastViewportPosition;
+      _panLastViewportPosition = event.localPosition;
+      if (delta == Offset.zero) {
+        return;
+      }
+
+      setState(() {
+        _offset = _clampOffset(_offset + delta, _scale, _viewportSize);
+      });
+      return;
+    }
+
     if (!_isErasingStroke || event.pointer != _erasePointerId) {
       return;
     }
@@ -133,6 +165,11 @@ class _EditorGridViewState extends State<EditorGridView> {
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    if (event.pointer == _panPointerId) {
+      _endModifiedPanIfNeeded();
+      return;
+    }
+
     if (event.pointer != _erasePointerId) {
       return;
     }
@@ -140,6 +177,11 @@ class _EditorGridViewState extends State<EditorGridView> {
   }
 
   void _handlePointerCancel(PointerCancelEvent event) {
+    if (event.pointer == _panPointerId) {
+      _endModifiedPanIfNeeded();
+      return;
+    }
+
     if (event.pointer != _erasePointerId) {
       return;
     }
@@ -147,6 +189,17 @@ class _EditorGridViewState extends State<EditorGridView> {
   }
 
   bool _hasSecondaryButton(int buttons) => buttons & kSecondaryMouseButton != 0;
+  bool _hasPrimaryButton(int buttons) => buttons & kPrimaryMouseButton != 0;
+  bool _hasMousePaintOrEraseButton(int buttons) =>
+      _hasPrimaryButton(buttons) || _hasSecondaryButton(buttons);
+
+  bool _isPanModifierPressed() {
+    final pressed = HardwareKeyboard.instance.logicalKeysPressed;
+    return pressed.contains(LogicalKeyboardKey.controlLeft) ||
+        pressed.contains(LogicalKeyboardKey.controlRight) ||
+        pressed.contains(LogicalKeyboardKey.metaLeft) ||
+        pressed.contains(LogicalKeyboardKey.metaRight);
+  }
 
   void _handlePointerPanZoomUpdate(PointerPanZoomUpdateEvent event) {
     final nextScale = (_panZoomStartScale * event.scale).clamp(
@@ -163,7 +216,7 @@ class _EditorGridViewState extends State<EditorGridView> {
   }
 
   void _handleScaleStart(ScaleStartDetails details) {
-    if (_isErasingStroke) {
+    if (_isErasingStroke || _isModifiedPanStroke) {
       _endPaintStrokeIfNeeded();
       return;
     }
@@ -187,7 +240,7 @@ class _EditorGridViewState extends State<EditorGridView> {
   }
 
   void _handleScaleUpdate(ScaleUpdateDetails details) {
-    if (_isErasingStroke) {
+    if (_isErasingStroke || _isModifiedPanStroke) {
       _endPaintStrokeIfNeeded();
       return;
     }
@@ -222,7 +275,7 @@ class _EditorGridViewState extends State<EditorGridView> {
   }
 
   void _handleScaleEnd(ScaleEndDetails details) {
-    if (_isErasingStroke) {
+    if (_isErasingStroke || _isModifiedPanStroke) {
       return;
     }
     _endPaintStrokeIfNeeded();
@@ -257,6 +310,15 @@ class _EditorGridViewState extends State<EditorGridView> {
     widget.onEraseStrokeEnd();
     _isErasingStroke = false;
     _erasePointerId = null;
+  }
+
+  void _endModifiedPanIfNeeded() {
+    if (!_isModifiedPanStroke) {
+      return;
+    }
+
+    _isModifiedPanStroke = false;
+    _panPointerId = null;
   }
 
   void _scheduleClampIfNeeded(Size viewportSize) {
