@@ -234,44 +234,33 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Widget _buildColorPalette(EditorState state) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: state.paletteColors.map((color) {
-            final selected = state.selectedColor.toARGB32() == color.toARGB32();
-            return InkWell(
-              onTap: () => _controller.selectColorAndActivatePaint(color),
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: state.paletteColors.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 6,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+      ),
+      itemBuilder: (context, index) {
+        final color = state.paletteColors[index];
+        final selected = state.selectedColor.toARGB32() == color.toARGB32();
+        return InkWell(
+          onTap: () => _controller.selectColorAndActivatePaint(color),
+          borderRadius: BorderRadius.circular(8),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: color,
               borderRadius: BorderRadius.circular(8),
-              child: Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: selected ? Colors.black : Colors.black26,
-                    width: selected ? 2 : 1,
-                  ),
-                ),
+              border: Border.all(
+                color: selected ? Colors.black : Colors.black26,
+                width: selected ? 2 : 1,
               ),
-            );
-          }).toList(),
-        ),
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed: null,
-          icon: const Icon(Icons.color_lens_outlined),
-          label: const Text('Add/Edit Color'),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'TODO: Wire a lightweight color picker after palette needs settle.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -383,8 +372,6 @@ class _EditorScreenState extends State<EditorScreen> {
         return 'Start';
       case EditorTool.erase:
         return 'Erase';
-      case EditorTool.select:
-        return 'Select';
     }
   }
 }

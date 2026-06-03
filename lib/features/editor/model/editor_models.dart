@@ -52,7 +52,7 @@ class EditorStrokeChange {
   final List<CellChange> changes;
 }
 
-enum EditorTool { paint, inactive, startMarker, erase, select }
+enum EditorTool { paint, inactive, startMarker, erase }
 
 class EditorState {
   const EditorState({
@@ -72,16 +72,30 @@ class EditorState {
       selectedColor: Colors.red,
       selectedTool: EditorTool.paint,
       paletteColors: const [
-        Colors.red,
-        Colors.orange,
-        Colors.yellow,
-        Colors.green,
-        Colors.blue,
-        Colors.purple,
-        Colors.cyan,
-        Colors.brown,
-        Colors.black,
-        Color(0xFFE0E0E0),
+        Color(0xFFD32F2F),
+        Color(0xFFE53935),
+        Color(0xFFF06292),
+        Color(0xFFE91E63),
+        Color(0xFFFB8C00),
+        Color(0xFFFFB300),
+        Color(0xFFFDD835),
+        Color(0xFFFFEE58),
+        Color(0xFF7CB342),
+        Color(0xFF43A047),
+        Color(0xFF00897B),
+        Color(0xFF26A69A),
+        Color(0xFF00ACC1),
+        Color(0xFF039BE5),
+        Color(0xFF1E88E5),
+        Color(0xFF3949AB),
+        Color(0xFF5E35B1),
+        Color(0xFF8E24AA),
+        Color(0xFF6D4C41),
+        Color(0xFF8D6E63),
+        Color(0xFF546E7A),
+        Color(0xFF757575),
+        Color(0xFF212121),
+        Color(0xFFBDBDBD),
       ],
     );
   }

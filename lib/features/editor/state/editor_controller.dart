@@ -163,11 +163,6 @@ class EditorController extends ChangeNotifier {
       return;
     }
 
-    if (_state.selectedTool == EditorTool.select) {
-      selectCell(index);
-      return;
-    }
-
     final current = _state.cells[index];
     final isEmptyForPaintOrInactive =
         current.paintColor == null && !current.isInactive;
@@ -191,8 +186,6 @@ class EditorController extends ChangeNotifier {
         updated = current.copyWith(hasStartMarker: true);
       case EditorTool.erase:
         updated = const EditorCell();
-      case EditorTool.select:
-        updated = current;
     }
 
     final nextCells = List<EditorCell>.from(_state.cells);
