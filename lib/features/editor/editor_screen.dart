@@ -164,6 +164,8 @@ class _EditorScreenState extends State<EditorScreen> {
                             onEraseCellDrag: _controller.eraseCell,
                             onEraseStrokeEnd: _controller.endEraseStroke,
                             onEditorInteractionStart: _onGridInteractionStart,
+                            onColorPick:
+                                _controller.selectColorAndActivatePaint,
                           ),
                         ),
                       ),

@@ -14,6 +14,7 @@ class EditorGridView extends StatefulWidget {
     required this.onEraseCellDrag,
     required this.onEraseStrokeEnd,
     required this.onEditorInteractionStart,
+    required this.onColorPick,
   });
 
   final EditorState state;
@@ -24,6 +25,7 @@ class EditorGridView extends StatefulWidget {
   final ValueChanged<int> onEraseCellDrag;
   final VoidCallback onEraseStrokeEnd;
   final VoidCallback onEditorInteractionStart;
+  final ValueChanged<Color> onColorPick;
 
   @override
   State<EditorGridView> createState() => _EditorGridViewState();
@@ -43,6 +45,11 @@ class _EditorGridViewState extends State<EditorGridView> {
   bool _isPaintingStroke = false;
   bool _isErasingStroke = false;
   int? _erasePointerId;
+  int? _primaryPointerId;
+  bool _isPendingColorPick = false;
+  int? _pendingColorPickIndex;
+  int? _primaryLastIndex;
+  bool _primaryMovedAcrossCells = false;
   bool _isModifiedPanStroke = false;
   int? _panPointerId;
   Offset _panLastViewportPosition = Offset.zero;
@@ -125,6 +132,21 @@ class _EditorGridViewState extends State<EditorGridView> {
     }
 
     if (!_hasSecondaryButton(event.buttons)) {
+      if (_hasPrimaryButton(event.buttons)) {
+        _primaryPointerId = event.pointer;
+        _primaryLastIndex = _indexFromViewportPosition(event.localPosition);
+        _primaryMovedAcrossCells = false;
+
+        final canPickFromIndex = _primaryLastIndex;
+        if (canPickFromIndex != null &&
+            _canPickColorFromCell(canPickFromIndex)) {
+          _isPendingColorPick = true;
+          _pendingColorPickIndex = canPickFromIndex;
+        } else {
+          _isPendingColorPick = false;
+          _pendingColorPickIndex = null;
+        }
+      }
       return;
     }
 
@@ -159,6 +181,13 @@ class _EditorGridViewState extends State<EditorGridView> {
     }
 
     if (!_isErasingStroke || event.pointer != _erasePointerId) {
+      if (event.pointer == _primaryPointerId) {
+        final index = _indexFromViewportPosition(event.localPosition);
+        if (index != _primaryLastIndex) {
+          _primaryMovedAcrossCells = true;
+          _primaryLastIndex = index;
+        }
+      }
       return;
     }
 
@@ -175,6 +204,21 @@ class _EditorGridViewState extends State<EditorGridView> {
     }
 
     if (event.pointer != _erasePointerId) {
+      if (event.pointer == _primaryPointerId) {
+        final upIndex = _indexFromViewportPosition(event.localPosition);
+        final isTrueClick = !_primaryMovedAcrossCells &&
+            _isPendingColorPick &&
+            _pendingColorPickIndex != null &&
+            upIndex == _pendingColorPickIndex;
+        if (isTrueClick) {
+          final cell = widget.state.cells[_pendingColorPickIndex!];
+          final color = cell.paintColor;
+          if (color != null && !cell.isInactive) {
+            widget.onColorPick(color);
+          }
+        }
+        _resetPrimaryPointerState();
+      }
       return;
     }
     _endEraseStrokeIfNeeded();
@@ -187,6 +231,9 @@ class _EditorGridViewState extends State<EditorGridView> {
     }
 
     if (event.pointer != _erasePointerId) {
+      if (event.pointer == _primaryPointerId) {
+        _resetPrimaryPointerState();
+      }
       return;
     }
     _endEraseStrokeIfNeeded();
@@ -233,6 +280,12 @@ class _EditorGridViewState extends State<EditorGridView> {
 
     if (_isViewportGesture) {
       _endPaintStrokeIfNeeded();
+      _isPendingColorPick = false;
+      _pendingColorPickIndex = null;
+      return;
+    }
+
+    if (_isPendingColorPick) {
       return;
     }
 
@@ -246,6 +299,18 @@ class _EditorGridViewState extends State<EditorGridView> {
   void _handleScaleUpdate(ScaleUpdateDetails details) {
     if (_isErasingStroke || _isModifiedPanStroke) {
       _endPaintStrokeIfNeeded();
+      return;
+    }
+
+    if (_isPendingColorPick) {
+      final index = _indexFromViewportPosition(details.localFocalPoint);
+      final pendingIndex = _pendingColorPickIndex;
+      if (index != null && pendingIndex != null && index != pendingIndex) {
+        _isPendingColorPick = false;
+        _pendingColorPickIndex = null;
+        _isPaintingStroke = true;
+        widget.onStrokeStart(index);
+      }
       return;
     }
 
@@ -282,8 +347,27 @@ class _EditorGridViewState extends State<EditorGridView> {
     if (_isErasingStroke || _isModifiedPanStroke) {
       return;
     }
+    if (_isPendingColorPick) {
+      return;
+    }
     _endPaintStrokeIfNeeded();
     _isViewportGesture = false;
+  }
+
+  bool _canPickColorFromCell(int index) {
+    if (widget.state.selectedTool != EditorTool.paint) {
+      return false;
+    }
+    final cell = widget.state.cells[index];
+    return cell.paintColor != null && !cell.isInactive;
+  }
+
+  void _resetPrimaryPointerState() {
+    _primaryPointerId = null;
+    _primaryLastIndex = null;
+    _primaryMovedAcrossCells = false;
+    _isPendingColorPick = false;
+    _pendingColorPickIndex = null;
   }
 
   void _zoomAt(Offset viewportFocalPoint, double targetScale) {
