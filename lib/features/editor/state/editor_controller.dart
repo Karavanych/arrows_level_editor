@@ -4,9 +4,15 @@ import 'package:flutter/material.dart';
 class EditorController extends ChangeNotifier {
   EditorController() : _state = EditorState.initial();
 
+  static const int _maxHistoryDepth = 3;
+
   EditorState _state;
   final Set<int> _strokeTouchedCells = {};
   final Set<int> _eraseStrokeTouchedCells = {};
+  final List<EditorStrokeChange> _undoHistory = [];
+  final List<EditorStrokeChange> _redoHistory = [];
+  final Map<int, EditorCell> _strokeBeforeCells = {};
+  final Set<int> _strokeChangedCells = {};
 
   EditorState get state => _state;
 
@@ -21,6 +27,10 @@ class EditorController extends ChangeNotifier {
       ),
       clearSelectedCell: true,
     );
+    _undoHistory.clear();
+    _redoHistory.clear();
+    _strokeBeforeCells.clear();
+    _strokeChangedCells.clear();
     notifyListeners();
   }
 
@@ -36,6 +46,7 @@ class EditorController extends ChangeNotifier {
 
   void beginStroke(int index) {
     _strokeTouchedCells.clear();
+    _beginHistoryStroke();
     touchCell(index);
   }
 
@@ -48,10 +59,12 @@ class EditorController extends ChangeNotifier {
 
   void endStroke() {
     _strokeTouchedCells.clear();
+    _commitHistoryStroke();
   }
 
   void beginEraseStroke(int index) {
     _eraseStrokeTouchedCells.clear();
+    _beginHistoryStroke();
     eraseCell(index);
   }
 
@@ -64,6 +77,53 @@ class EditorController extends ChangeNotifier {
 
   void endEraseStroke() {
     _eraseStrokeTouchedCells.clear();
+    _commitHistoryStroke();
+  }
+
+  void undo() {
+    if (_undoHistory.isEmpty) {
+      return;
+    }
+
+    final stroke = _undoHistory.removeLast();
+    final nextCells = List<EditorCell>.from(_state.cells);
+    int? selectedIndex;
+    for (final change in stroke.changes) {
+      final index = _indexFromCoordinates(change.x, change.y);
+      if (index == null) {
+        continue;
+      }
+      nextCells[index] = change.beforeCell;
+      selectedIndex = index;
+    }
+
+    _state = _state.copyWith(cells: nextCells, selectedCellIndex: selectedIndex);
+    _redoHistory.add(stroke);
+    _trimHistory(_redoHistory);
+    notifyListeners();
+  }
+
+  void redo() {
+    if (_redoHistory.isEmpty) {
+      return;
+    }
+
+    final stroke = _redoHistory.removeLast();
+    final nextCells = List<EditorCell>.from(_state.cells);
+    int? selectedIndex;
+    for (final change in stroke.changes) {
+      final index = _indexFromCoordinates(change.x, change.y);
+      if (index == null) {
+        continue;
+      }
+      nextCells[index] = change.afterCell;
+      selectedIndex = index;
+    }
+
+    _state = _state.copyWith(cells: nextCells, selectedCellIndex: selectedIndex);
+    _undoHistory.add(stroke);
+    _trimHistory(_undoHistory);
+    notifyListeners();
   }
 
   void clearCell(int index) {
@@ -81,6 +141,7 @@ class EditorController extends ChangeNotifier {
     final nextCells = List<EditorCell>.from(_state.cells);
     nextCells[index] = const EditorCell();
     _state = _state.copyWith(cells: nextCells, selectedCellIndex: index);
+    _recordCellChange(index, current);
     notifyListeners();
   }
 
@@ -132,6 +193,78 @@ class EditorController extends ChangeNotifier {
     final nextCells = List<EditorCell>.from(_state.cells);
     nextCells[index] = updated;
     _state = _state.copyWith(cells: nextCells, selectedCellIndex: index);
+    _recordCellChange(index, current);
     notifyListeners();
+  }
+
+  void _beginHistoryStroke() {
+    _strokeBeforeCells.clear();
+    _strokeChangedCells.clear();
+  }
+
+  void _commitHistoryStroke() {
+    if (_strokeChangedCells.isEmpty) {
+      _strokeBeforeCells.clear();
+      return;
+    }
+
+    final width = _state.gridSize.width;
+    final changes = <CellChange>[];
+    for (final index in _strokeChangedCells) {
+      final before = _strokeBeforeCells[index];
+      if (before == null) {
+        continue;
+      }
+      final after = _state.cells[index];
+      if (_cellsEqual(before, after)) {
+        continue;
+      }
+      changes.add(
+        CellChange(
+          x: index % width,
+          y: index ~/ width,
+          beforeCell: before,
+          afterCell: after,
+        ),
+      );
+    }
+
+    _strokeBeforeCells.clear();
+    _strokeChangedCells.clear();
+    if (changes.isEmpty) {
+      return;
+    }
+
+    _undoHistory.add(EditorStrokeChange(changes: changes));
+    _trimHistory(_undoHistory);
+    _redoHistory.clear();
+  }
+
+  void _recordCellChange(int index, EditorCell beforeCell) {
+    _strokeBeforeCells.putIfAbsent(index, () => beforeCell);
+    _strokeChangedCells.add(index);
+  }
+
+  int? _indexFromCoordinates(int x, int y) {
+    final width = _state.gridSize.width;
+    final height = _state.gridSize.height;
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+      return null;
+    }
+    return (y * width) + x;
+  }
+
+  bool _cellsEqual(EditorCell a, EditorCell b) {
+    final aColor = a.paintColor;
+    final bColor = b.paintColor;
+    return aColor?.toARGB32() == bColor?.toARGB32() &&
+        a.isInactive == b.isInactive &&
+        a.hasStartMarker == b.hasStartMarker;
+  }
+
+  void _trimHistory(List<EditorStrokeChange> history) {
+    while (history.length > _maxHistoryDepth) {
+      history.removeAt(0);
+    }
   }
 }

@@ -32,6 +32,26 @@ class EditorCell {
   }
 }
 
+class CellChange {
+  const CellChange({
+    required this.x,
+    required this.y,
+    required this.beforeCell,
+    required this.afterCell,
+  });
+
+  final int x;
+  final int y;
+  final EditorCell beforeCell;
+  final EditorCell afterCell;
+}
+
+class EditorStrokeChange {
+  const EditorStrokeChange({required this.changes});
+
+  final List<CellChange> changes;
+}
+
 enum EditorTool { paint, inactive, startMarker, erase, select }
 
 class EditorState {

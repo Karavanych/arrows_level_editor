@@ -2,6 +2,7 @@ import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
 import 'package:arrows_level_editor/features/editor/state/editor_controller.dart';
 import 'package:arrows_level_editor/features/editor/widgets/editor_grid_view.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class EditorScreen extends StatefulWidget {
   const EditorScreen({super.key});
@@ -12,6 +13,7 @@ class EditorScreen extends StatefulWidget {
 
 class _EditorScreenState extends State<EditorScreen> {
   final EditorController _controller = EditorController();
+  final FocusNode _focusNode = FocusNode();
   final TextEditingController _widthController = TextEditingController(
     text: '10',
   );
@@ -20,8 +22,17 @@ class _EditorScreenState extends State<EditorScreen> {
   );
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _requestEditorFocus();
+    });
+  }
+
+  @override
   void dispose() {
     _controller.dispose();
+    _focusNode.dispose();
     _widthController.dispose();
     _heightController.dispose();
     super.dispose();
@@ -36,80 +47,140 @@ class _EditorScreenState extends State<EditorScreen> {
     _controller.generateGrid(width: width, height: height);
   }
 
+  void _requestEditorFocus() {
+    if (!_focusNode.hasFocus) {
+      _focusNode.requestFocus();
+    }
+  }
+
+  void _onGridInteractionStart() {
+    _requestEditorFocus();
+  }
+
+  KeyEventResult _handleEditorKeyEvent(KeyEvent event) {
+    final key = event.logicalKey;
+    final isMetaPressed = HardwareKeyboard.instance.isMetaPressed;
+    final isControlPressed = HardwareKeyboard.instance.isControlPressed;
+    final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
+    final isPrimaryShortcutModifierPressed = isMetaPressed || isControlPressed;
+
+    if (!isPrimaryShortcutModifierPressed) {
+      return KeyEventResult.ignored;
+    }
+
+    if (event is KeyRepeatEvent &&
+        (key == LogicalKeyboardKey.keyZ || key == LogicalKeyboardKey.keyY)) {
+      return KeyEventResult.handled;
+    }
+
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    final focusedContext = FocusManager.instance.primaryFocus?.context;
+    if (focusedContext?.widget is EditableText) {
+      return KeyEventResult.ignored;
+    }
+
+    if (key == LogicalKeyboardKey.keyZ) {
+      if (isShiftPressed) {
+        _controller.redo();
+      } else {
+        _controller.undo();
+      }
+      return KeyEventResult.handled;
+    }
+
+    if (!isMetaPressed && isControlPressed && key == LogicalKeyboardKey.keyY) {
+      _controller.redo();
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, _) {
-            final state = _controller.state;
-            return Row(
-              children: [
-                Container(
-                  width: 280,
-                  padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
-                    border: Border(right: BorderSide(color: Colors.black12)),
-                  ),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Arrows Level Editor',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 16),
-                        _buildDimensionInputs(),
-                        const SizedBox(height: 20),
-                        Text(
-                          'Tool',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        _buildToolSelector(state),
-                        const SizedBox(height: 20),
-                        Text(
-                          'Color Palette',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        _buildColorPalette(state),
-                      ],
+        child: Focus(
+          autofocus: true,
+          focusNode: _focusNode,
+          onKeyEvent: (_, event) => _handleEditorKeyEvent(event),
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, _) {
+              final state = _controller.state;
+              return Row(
+                children: [
+                  Container(
+                    width: 280,
+                    padding: const EdgeInsets.all(16),
+                    decoration: const BoxDecoration(
+                      border: Border(
+                        right: BorderSide(color: Colors.black12),
+                      ),
+                    ),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Arrows Level Editor',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 16),
+                          _buildDimensionInputs(),
+                          const SizedBox(height: 20),
+                          Text(
+                            'Tool',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          _buildToolSelector(state),
+                          const SizedBox(height: 20),
+                          Text(
+                            'Color Palette',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          _buildColorPalette(state),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                Expanded(
-                  child: Container(
-                    color: const Color(0xFFF5F5F5),
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: EditorGridView(
-                          state: state,
-                          onStrokeStart: _controller.beginStroke,
-                          onCellDrag: _controller.touchCell,
-                          onStrokeEnd: _controller.endStroke,
-                          onEraseStrokeStart: _controller.beginEraseStroke,
-                          onEraseCellDrag: _controller.eraseCell,
-                          onEraseStrokeEnd: _controller.endEraseStroke,
+                  Expanded(
+                    child: Container(
+                      color: const Color(0xFFF5F5F5),
+                      child: Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: EditorGridView(
+                            state: state,
+                            onStrokeStart: _controller.beginStroke,
+                            onCellDrag: _controller.touchCell,
+                            onStrokeEnd: _controller.endStroke,
+                            onEraseStrokeStart: _controller.beginEraseStroke,
+                            onEraseCellDrag: _controller.eraseCell,
+                            onEraseStrokeEnd: _controller.endEraseStroke,
+                            onEditorInteractionStart: _onGridInteractionStart,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                Container(
-                  width: 250,
-                  padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
-                    border: Border(left: BorderSide(color: Colors.black12)),
+                  Container(
+                    width: 250,
+                    padding: const EdgeInsets.all(16),
+                    decoration: const BoxDecoration(
+                      border: Border(left: BorderSide(color: Colors.black12)),
+                    ),
+                    child: _buildDebugPanel(state),
                   ),
-                  child: _buildDebugPanel(state),
-                ),
-              ],
-            );
-          },
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -218,7 +289,7 @@ class _EditorScreenState extends State<EditorScreen> {
         Text('State Preview', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 12),
         Text('Grid: ${state.gridSize.width} x ${state.gridSize.height}'),
-        const SizedBox(height: 8),
+        const Divider(height: 20),
         Text('Selected tool: ${_toolLabel(state.selectedTool)}'),
         const SizedBox(height: 8),
         Text('Selected color: ${_colorLabel(state.selectedColor)}'),

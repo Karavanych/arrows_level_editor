@@ -13,6 +13,7 @@ class EditorGridView extends StatefulWidget {
     required this.onEraseStrokeStart,
     required this.onEraseCellDrag,
     required this.onEraseStrokeEnd,
+    required this.onEditorInteractionStart,
   });
 
   final EditorState state;
@@ -22,6 +23,7 @@ class EditorGridView extends StatefulWidget {
   final ValueChanged<int> onEraseStrokeStart;
   final ValueChanged<int> onEraseCellDrag;
   final VoidCallback onEraseStrokeEnd;
+  final VoidCallback onEditorInteractionStart;
 
   @override
   State<EditorGridView> createState() => _EditorGridViewState();
@@ -111,6 +113,8 @@ class _EditorGridViewState extends State<EditorGridView> {
   }
 
   void _handlePointerDown(PointerDownEvent event) {
+    widget.onEditorInteractionStart();
+
     if (_isPanModifierPressed() && _hasMousePaintOrEraseButton(event.buttons)) {
       _endPaintStrokeIfNeeded();
       _endEraseStrokeIfNeeded();
