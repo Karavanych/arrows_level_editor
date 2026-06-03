@@ -103,15 +103,23 @@ class EditorController extends ChangeNotifier {
     }
 
     final current = _state.cells[index];
+    final isEmptyForPaintOrInactive =
+        current.paintColor == null && !current.isInactive;
     late final EditorCell updated;
 
     switch (_state.selectedTool) {
       case EditorTool.paint:
+        if (!isEmptyForPaintOrInactive) {
+          return;
+        }
         updated = current.copyWith(
           paintColor: _state.selectedColor,
           isInactive: false,
         );
       case EditorTool.inactive:
+        if (!isEmptyForPaintOrInactive) {
+          return;
+        }
         updated = const EditorCell(isInactive: true);
       case EditorTool.startMarker:
         updated = current.copyWith(hasStartMarker: true);
