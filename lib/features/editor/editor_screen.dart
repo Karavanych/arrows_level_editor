@@ -1,5 +1,6 @@
 import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
 import 'package:arrows_level_editor/features/editor/state/editor_controller.dart';
+import 'package:arrows_level_editor/features/editor/validation/editor_save_validation.dart';
 import 'package:arrows_level_editor/features/editor/widgets/editor_grid_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -21,11 +22,16 @@ class _EditorScreenState extends State<EditorScreen> {
     text: '10',
   );
 
+  final Set<int> _highlightedErrorCells = <int>{};
+  bool _isBlinkOn = false;
+  bool _isBusy = false;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       _requestEditorFocus();
+      await _loadInitialPack();
     });
   }
 
@@ -38,6 +44,24 @@ class _EditorScreenState extends State<EditorScreen> {
     super.dispose();
   }
 
+  Future<void> _loadInitialPack() async {
+    if (!mounted || _isBusy) {
+      return;
+    }
+    setState(() {
+      _isBusy = true;
+    });
+    try {
+      await _controller.loadLevelFromDefaultPack();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
+    }
+  }
+
   void _handleGenerate() {
     final width = int.tryParse(_widthController.text);
     final height = int.tryParse(_heightController.text);
@@ -45,6 +69,265 @@ class _EditorScreenState extends State<EditorScreen> {
       return;
     }
     _controller.generateGrid(width: width, height: height);
+  }
+
+  Future<void> _handleOpen() async {
+    if (_isBusy) {
+      return;
+    }
+    setState(() {
+      _isBusy = true;
+    });
+    try {
+      await _controller.loadLevelFromDefaultPack();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Pack opened.')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to open pack: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleSave() async {
+    if (_isBusy) {
+      return;
+    }
+    setState(() {
+      _isBusy = true;
+    });
+    try {
+      final saved = await _runSaveFlowWithValidation();
+      if (!mounted || !saved) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Level saved.')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to save level: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<bool> _runSaveFlowWithValidation() async {
+    var validation = _controller.validateCurrentLevelBeforeSave();
+
+    while (validation.hasBlockingProblems) {
+      final emptyProblems = validation.problems.where(
+        (problem) => problem.code == SaveValidationProblemCode.emptyCells,
+      );
+      if (emptyProblems.isNotEmpty) {
+        final cells = emptyProblems.expand((it) => it.cellIndices).toSet();
+        await _blinkProblemCells(cells);
+        if (!mounted) {
+          return false;
+        }
+        final yes = await _askYesCancel(
+          title: 'Empty cells found',
+          message: 'Fill all empty cells as inactive and retry save?',
+        );
+        if (yes != true) {
+          return false;
+        }
+        validation = _controller.applyAutoFixAndRevalidate(
+          SaveValidationAutoFixType.fillEmptyCellsAsInactive,
+        );
+        continue;
+      }
+
+      final missingStartProblems = validation.problems.where(
+        (problem) => problem.code == SaveValidationProblemCode.missingLineStart,
+      );
+      if (missingStartProblems.isNotEmpty) {
+        final cells = missingStartProblems
+            .expand((it) => it.cellIndices)
+            .toSet();
+        await _blinkProblemCells(cells);
+        if (!mounted) {
+          return false;
+        }
+        final hasAutoFix = validation.autoFixes.any(
+          (fix) => fix.type == SaveValidationAutoFixType.addTemporaryStarts,
+        );
+        if (!hasAutoFix) {
+          _showErrorSnackBar(
+            'Save blocked: some lines have no temporary start candidate.',
+          );
+          return false;
+        }
+        final yes = await _askYesCancel(
+          title: 'Missing line starts',
+          message: 'Place starts automatically for lines without starts?',
+        );
+        if (yes != true) {
+          return false;
+        }
+        validation = _controller.applyAutoFixAndRevalidate(
+          SaveValidationAutoFixType.addTemporaryStarts,
+        );
+        continue;
+      }
+
+      final singleIslands = validation.problems.where(
+        (problem) =>
+            problem.code == SaveValidationProblemCode.singleCellColorIsland,
+      );
+      if (singleIslands.isNotEmpty) {
+        final cells = singleIslands.expand((it) => it.cellIndices).toSet();
+        await _blinkProblemCells(cells);
+        if (!mounted) {
+          return false;
+        }
+        _showErrorSnackBar(
+          'Save blocked: single-cell color islands must be fixed manually.',
+        );
+      }
+      return false;
+    }
+
+    await _controller.saveCurrentLevelToDefaultPack(skipValidation: true);
+    return true;
+  }
+
+  Future<void> _handleLevelSwitch(String targetLevelId) async {
+    if (_isBusy || targetLevelId == _controller.currentLevelId) {
+      return;
+    }
+
+    if (_controller.isCurrentLevelDirty) {
+      final shouldSave = await _askYesCancel(
+        title: 'Unsaved changes',
+        message: 'Save current level before switching?',
+      );
+      if (shouldSave != true) {
+        return;
+      }
+
+      setState(() {
+        _isBusy = true;
+      });
+      try {
+        final saved = await _runSaveFlowWithValidation();
+        if (!saved) {
+          return;
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isBusy = false;
+          });
+        }
+      }
+    }
+
+    setState(() {
+      _isBusy = true;
+    });
+    try {
+      await _controller.loadLevelFromDefaultPack(levelId: targetLevelId);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to switch level: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _blinkProblemCells(Set<int> cells) async {
+    if (cells.isEmpty || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _highlightedErrorCells
+        ..clear()
+        ..addAll(cells);
+      _isBlinkOn = true;
+    });
+
+    for (var i = 0; i < 2; i += 1) {
+      await Future<void>.delayed(const Duration(milliseconds: 180));
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isBlinkOn = false;
+      });
+
+      await Future<void>.delayed(const Duration(milliseconds: 180));
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isBlinkOn = true;
+      });
+    }
+
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isBlinkOn = false;
+      _highlightedErrorCells.clear();
+    });
+  }
+
+  Future<bool?> _askYesCancel({
+    required String title,
+    required String message,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Yes'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
   }
 
   void _requestEditorFocus() {
@@ -67,12 +350,10 @@ class _EditorScreenState extends State<EditorScreen> {
     if (!isPrimaryShortcutModifierPressed) {
       return KeyEventResult.ignored;
     }
-
     if (event is KeyRepeatEvent &&
         (key == LogicalKeyboardKey.keyZ || key == LogicalKeyboardKey.keyY)) {
       return KeyEventResult.handled;
     }
-
     if (event is! KeyDownEvent) {
       return KeyEventResult.ignored;
     }
@@ -90,12 +371,10 @@ class _EditorScreenState extends State<EditorScreen> {
       }
       return KeyEventResult.handled;
     }
-
     if (!isMetaPressed && isControlPressed && key == LogicalKeyboardKey.keyY) {
       _controller.redo();
       return KeyEventResult.handled;
     }
-
     return KeyEventResult.ignored;
   }
 
@@ -117,9 +396,7 @@ class _EditorScreenState extends State<EditorScreen> {
                     width: 280,
                     padding: const EdgeInsets.all(16),
                     decoration: const BoxDecoration(
-                      border: Border(
-                        right: BorderSide(color: Colors.black12),
-                      ),
+                      border: Border(right: BorderSide(color: Colors.black12)),
                     ),
                     child: SingleChildScrollView(
                       child: Column(
@@ -131,6 +408,8 @@ class _EditorScreenState extends State<EditorScreen> {
                           ),
                           const SizedBox(height: 16),
                           _buildDimensionInputs(),
+                          const SizedBox(height: 12),
+                          _buildFileActions(),
                           const SizedBox(height: 20),
                           Text(
                             'Tool',
@@ -166,18 +445,21 @@ class _EditorScreenState extends State<EditorScreen> {
                             onEditorInteractionStart: _onGridInteractionStart,
                             onColorPick:
                                 _controller.selectColorAndActivatePaint,
+                            highlightedErrorCells: _isBlinkOn
+                                ? Set<int>.from(_highlightedErrorCells)
+                                : const <int>{},
                           ),
                         ),
                       ),
                     ),
                   ),
                   Container(
-                    width: 250,
+                    width: 280,
                     padding: const EdgeInsets.all(16),
                     decoration: const BoxDecoration(
                       border: Border(left: BorderSide(color: Colors.black12)),
                     ),
-                    child: _buildDebugPanel(state),
+                    child: _buildRightPanel(state),
                   ),
                 ],
               );
@@ -215,6 +497,26 @@ class _EditorScreenState extends State<EditorScreen> {
           child: ElevatedButton(
             onPressed: _handleGenerate,
             child: const Text('Generate'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFileActions() {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: _isBusy ? null : _handleOpen,
+            child: const Text('Open'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: FilledButton(
+            onPressed: _isBusy ? null : _handleSave,
+            child: const Text('Save'),
           ),
         ),
       ],
@@ -266,6 +568,78 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
+  Widget _buildRightPanel(EditorState state) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildPackSection(),
+        const Divider(height: 20),
+        _buildLevelsSection(),
+        const Divider(height: 20),
+        Expanded(child: _buildDebugPanel(state)),
+      ],
+    );
+  }
+
+  Widget _buildPackSection() {
+    final packName = _controller.currentPackName ?? 'Not opened yet';
+    final dirtyText = _controller.isCurrentLevelDirty ? 'Yes' : 'No';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Pack', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Text('Name: $packName'),
+        const SizedBox(height: 4),
+        Text('Current level: ${_controller.currentLevelId}'),
+        const SizedBox(height: 4),
+        Text('Unsaved changes: $dirtyText'),
+        const SizedBox(height: 4),
+        Text('Last validation: ${_validationBrief()}'),
+      ],
+    );
+  }
+
+  Widget _buildLevelsSection() {
+    final levels = _controller.availableLevels;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Levels', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        if (levels.isEmpty)
+          const Text('No levels in current pack.')
+        else
+          SizedBox(
+            height: 140,
+            child: ListView.separated(
+              itemCount: levels.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 6),
+              itemBuilder: (context, index) {
+                final level = levels[index];
+                final selected = level.id == _controller.currentLevelId;
+                return ListTile(
+                  dense: true,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: BorderSide(
+                      color: selected ? Colors.indigo : Colors.black12,
+                    ),
+                  ),
+                  tileColor: selected
+                      ? Colors.indigo.withValues(alpha: 0.08)
+                      : null,
+                  title: Text(level.id),
+                  subtitle: Text(level.path),
+                  onTap: _isBusy ? null : () => _handleLevelSwitch(level.id),
+                );
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _buildDebugPanel(EditorState state) {
     final inactiveCount = state.cells.where((cell) => cell.isInactive).length;
     final markerCount = state.cells.where((cell) => cell.hasStartMarker).length;
@@ -274,50 +648,51 @@ class _EditorScreenState extends State<EditorScreen> {
         .length;
     final selectedCell = _selectedCell(state);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('State Preview', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 12),
-        Text('Grid: ${state.gridSize.width} x ${state.gridSize.height}'),
-        const Divider(height: 20),
-        Text('Selected tool: ${_toolLabel(state.selectedTool)}'),
-        const SizedBox(height: 8),
-        Text('Selected color: ${_colorLabel(state.selectedColor)}'),
-        const SizedBox(height: 8),
-        Text('Painted cells: $paintedCount'),
-        const SizedBox(height: 4),
-        Text('Inactive cells: $inactiveCount'),
-        const SizedBox(height: 4),
-        Text('Start markers: $markerCount'),
-        const Divider(height: 28),
-        Text('Selected Cell', style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: 8),
-        if (selectedCell == null)
-          const Text('None')
-        else ...[
-          Text('Index: ${state.selectedCellIndex}'),
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('State Preview', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 12),
+          Text('Grid: ${state.gridSize.width} x ${state.gridSize.height}'),
+          const Divider(height: 20),
+          Text('Selected tool: ${_toolLabel(state.selectedTool)}'),
+          const SizedBox(height: 8),
+          Text('Selected color: ${_colorLabel(state.selectedColor)}'),
+          const SizedBox(height: 8),
+          Text('Painted cells: $paintedCount'),
           const SizedBox(height: 4),
-          Text('Color: ${_colorLabel(selectedCell.paintColor)}'),
+          Text('Inactive cells: $inactiveCount'),
           const SizedBox(height: 4),
-          Text('Inactive: ${selectedCell.isInactive}'),
-          const SizedBox(height: 4),
-          Text('Start marker: ${selectedCell.hasStartMarker}'),
-        ],
-        const Divider(height: 28),
-        Text('Internal Preview', style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: 8),
-        Expanded(
-          child: SingleChildScrollView(
-            child: SelectableText(
-              _statePreview(state),
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
-            ),
+          Text('Start markers: $markerCount'),
+          const Divider(height: 28),
+          Text('Selected Cell', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          if (selectedCell == null)
+            const Text('None')
+          else ...[
+            Text('Index: ${state.selectedCellIndex}'),
+            const SizedBox(height: 4),
+            Text('Color: ${_colorLabel(selectedCell.paintColor)}'),
+            const SizedBox(height: 4),
+            Text('Inactive: ${selectedCell.isInactive}'),
+            const SizedBox(height: 4),
+            Text('Start marker: ${selectedCell.hasStartMarker}'),
+          ],
+          const Divider(height: 28),
+          Text(
+            'Internal Preview',
+            style: Theme.of(context).textTheme.titleSmall,
           ),
-        ),
-      ],
+          const SizedBox(height: 8),
+          SelectableText(
+            _statePreview(state),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -355,6 +730,17 @@ class _EditorScreenState extends State<EditorScreen> {
     ${editedCells.isEmpty ? '// none' : editedCells.join(',\n    ')}
   ]
 }''';
+  }
+
+  String _validationBrief() {
+    final validation = _controller.lastSaveValidationResult;
+    if (validation == null) {
+      return 'none';
+    }
+    final blocking = validation.problems
+        .where((problem) => problem.isBlocking)
+        .length;
+    return '$blocking blocking / ${validation.autoFixes.length} auto-fixes';
   }
 
   String _colorLabel(Color? color) {

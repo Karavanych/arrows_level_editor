@@ -15,6 +15,7 @@ class EditorGridView extends StatefulWidget {
     required this.onEraseStrokeEnd,
     required this.onEditorInteractionStart,
     required this.onColorPick,
+    this.highlightedErrorCells = const {},
   });
 
   final EditorState state;
@@ -26,6 +27,7 @@ class EditorGridView extends StatefulWidget {
   final VoidCallback onEraseStrokeEnd;
   final VoidCallback onEditorInteractionStart;
   final ValueChanged<Color> onColorPick;
+  final Set<int> highlightedErrorCells;
 
   @override
   State<EditorGridView> createState() => _EditorGridViewState();
@@ -89,6 +91,7 @@ class _EditorGridViewState extends State<EditorGridView> {
                     cellSize: _cellSize,
                     scale: _scale,
                     offset: _offset,
+                    highlightedErrorCells: widget.highlightedErrorCells,
                   ),
                 ),
               ),
@@ -206,7 +209,8 @@ class _EditorGridViewState extends State<EditorGridView> {
     if (event.pointer != _erasePointerId) {
       if (event.pointer == _primaryPointerId) {
         final upIndex = _indexFromViewportPosition(event.localPosition);
-        final isTrueClick = !_primaryMovedAcrossCells &&
+        final isTrueClick =
+            !_primaryMovedAcrossCells &&
             _isPendingColorPick &&
             _pendingColorPickIndex != null &&
             upIndex == _pendingColorPickIndex;
@@ -503,12 +507,14 @@ class _GridPainter extends CustomPainter {
     required this.cellSize,
     required this.scale,
     required this.offset,
+    required this.highlightedErrorCells,
   });
 
   final EditorState state;
   final double cellSize;
   final double scale;
   final Offset offset;
+  final Set<int> highlightedErrorCells;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -552,6 +558,10 @@ class _GridPainter extends CustomPainter {
       ..color = Colors.indigo
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
+    final errorPaint = Paint()
+      ..color = Colors.redAccent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3;
 
     for (var row = firstRow; row < lastRow; row += 1) {
       for (var column = firstColumn; column < lastColumn; column += 1) {
@@ -591,7 +601,11 @@ class _GridPainter extends CustomPainter {
         }
 
         final isSelected = state.selectedCellIndex == index;
-        canvas.drawRect(rect, isSelected ? selectedPaint : gridLinePaint);
+        if (highlightedErrorCells.contains(index)) {
+          canvas.drawRect(rect, errorPaint);
+        } else {
+          canvas.drawRect(rect, isSelected ? selectedPaint : gridLinePaint);
+        }
       }
     }
 
@@ -603,6 +617,7 @@ class _GridPainter extends CustomPainter {
     return oldDelegate.state != state ||
         oldDelegate.cellSize != cellSize ||
         oldDelegate.scale != scale ||
-        oldDelegate.offset != offset;
+        oldDelegate.offset != offset ||
+        oldDelegate.highlightedErrorCells != highlightedErrorCells;
   }
 }

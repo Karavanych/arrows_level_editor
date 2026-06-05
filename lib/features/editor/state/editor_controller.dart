@@ -1,20 +1,48 @@
 import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
+import 'package:arrows_level_editor/features/editor/persistence/alevelpack_storage_service.dart';
+import 'package:arrows_level_editor/features/editor/persistence/editor_level_mapper.dart';
+import 'package:arrows_level_editor/features/editor/persistence/model/alevelpack_models.dart';
+import 'package:arrows_level_editor/features/editor/validation/editor_save_validation.dart';
 import 'package:flutter/material.dart';
 
 class EditorController extends ChangeNotifier {
-  EditorController() : _state = EditorState.initial();
+  EditorController({
+    ALevelPackStorageService? storageService,
+    EditorLevelMapper? levelMapper,
+    EditorSaveValidationService? saveValidationService,
+  }) : _state = EditorState.initial(),
+       _storageService = storageService ?? ALevelPackStorageService(),
+       _levelMapper = levelMapper ?? const EditorLevelMapper(),
+       _saveValidationService =
+           saveValidationService ?? EditorSaveValidationService();
 
   static const int _maxHistoryDepth = 3;
 
   EditorState _state;
+  final ALevelPackStorageService _storageService;
+  final EditorLevelMapper _levelMapper;
+  final EditorSaveValidationService _saveValidationService;
   final Set<int> _strokeTouchedCells = {};
   final Set<int> _eraseStrokeTouchedCells = {};
   final List<EditorStrokeChange> _undoHistory = [];
   final List<EditorStrokeChange> _redoHistory = [];
   final Map<int, EditorCell> _strokeBeforeCells = {};
   final Set<int> _strokeChangedCells = {};
+  ALevelPackDocument? _openedPack;
+  String _currentLevelId = 'level_001';
+  String? _lastOpenedLevelId;
+  SaveValidationResult? _lastSaveValidationResult;
+  bool _isCurrentLevelDirty = false;
 
   EditorState get state => _state;
+  String get currentLevelId => _currentLevelId;
+  String? get lastOpenedLevelId => _lastOpenedLevelId;
+  List<ALevelManifestEntry> get availableLevels =>
+      _openedPack?.manifest.levels ?? const [];
+  SaveValidationResult? get lastSaveValidationResult =>
+      _lastSaveValidationResult;
+  bool get isCurrentLevelDirty => _isCurrentLevelDirty;
+  String? get currentPackName => _openedPack?.manifest.name;
 
   void generateGrid({required int width, required int height}) {
     final safeWidth = width.clamp(1, 200);
@@ -31,6 +59,102 @@ class EditorController extends ChangeNotifier {
     _redoHistory.clear();
     _strokeBeforeCells.clear();
     _strokeChangedCells.clear();
+    _isCurrentLevelDirty = true;
+    notifyListeners();
+  }
+
+  Future<void> saveCurrentLevelToDefaultPack({
+    String? levelId,
+    bool skipValidation = false,
+  }) async {
+    final validation = skipValidation
+        ? (_lastSaveValidationResult ??
+              const SaveValidationResult(problems: [], autoFixes: []))
+        : validateCurrentLevelBeforeSave();
+    if (!skipValidation && validation.hasBlockingProblems) {
+      return;
+    }
+
+    final targetLevelId = levelId ?? _currentLevelId;
+    final level = _levelMapper.toPersistedLevel(
+      levelId: targetLevelId,
+      state: _state,
+    );
+
+    final existingPack = await _storageService.loadOrCreateDefaultPack(
+      paletteColors: _state.paletteColors,
+    );
+    final nextPack = _storageService.buildPackWithUpsertedLevel(
+      source: existingPack,
+      level: level,
+    );
+
+    final file = await _storageService.getDefaultPackFile();
+    await _storageService.savePack(file: file, pack: nextPack);
+    _openedPack = nextPack;
+    _currentLevelId = targetLevelId;
+    _lastSaveValidationResult = validation;
+    _isCurrentLevelDirty = false;
+    notifyListeners();
+  }
+
+  SaveValidationResult validateCurrentLevelBeforeSave() {
+    final result = _saveValidationService.validate(_state);
+    _lastSaveValidationResult = result;
+    notifyListeners();
+    return result;
+  }
+
+  SaveValidationResult applyAutoFixAndRevalidate(
+    SaveValidationAutoFixType autoFixType,
+  ) {
+    final beforeState = _state;
+    _state = _saveValidationService.applyAutoFix(
+      state: _state,
+      autoFixType: autoFixType,
+    );
+    _undoHistory.clear();
+    _redoHistory.clear();
+    _strokeBeforeCells.clear();
+    _strokeChangedCells.clear();
+    _strokeTouchedCells.clear();
+    _eraseStrokeTouchedCells.clear();
+
+    final result = _saveValidationService.validate(_state);
+    _lastSaveValidationResult = result;
+    if (!_statesEqual(beforeState, _state)) {
+      _isCurrentLevelDirty = true;
+    }
+    notifyListeners();
+    return result;
+  }
+
+  Future<void> loadLevelFromDefaultPack({String? levelId}) async {
+    final pack = await _storageService.loadOrCreateDefaultPack(
+      paletteColors: _state.paletteColors,
+    );
+    if (pack.levels.isEmpty) {
+      _openedPack = pack;
+      _isCurrentLevelDirty = false;
+      notifyListeners();
+      return;
+    }
+
+    final targetLevelId = levelId ?? _currentLevelId;
+    ALevelPackLevel? selected;
+    for (final level in pack.levels) {
+      if (level.id == targetLevelId) {
+        selected = level;
+        break;
+      }
+    }
+    selected ??= pack.levels.first;
+
+    _applyLoadedState(selected);
+    _openedPack = pack;
+    _lastOpenedLevelId = selected.id;
+    _currentLevelId = selected.id;
+    _isCurrentLevelDirty = false;
     notifyListeners();
   }
 
@@ -45,7 +169,10 @@ class EditorController extends ChangeNotifier {
   }
 
   void selectColorAndActivatePaint(Color color) {
-    _state = _state.copyWith(selectedColor: color, selectedTool: EditorTool.paint);
+    _state = _state.copyWith(
+      selectedColor: color,
+      selectedTool: EditorTool.paint,
+    );
     notifyListeners();
   }
 
@@ -102,7 +229,10 @@ class EditorController extends ChangeNotifier {
       selectedIndex = index;
     }
 
-    _state = _state.copyWith(cells: nextCells, selectedCellIndex: selectedIndex);
+    _state = _state.copyWith(
+      cells: nextCells,
+      selectedCellIndex: selectedIndex,
+    );
     _redoHistory.add(stroke);
     _trimHistory(_redoHistory);
     notifyListeners();
@@ -125,7 +255,10 @@ class EditorController extends ChangeNotifier {
       selectedIndex = index;
     }
 
-    _state = _state.copyWith(cells: nextCells, selectedCellIndex: selectedIndex);
+    _state = _state.copyWith(
+      cells: nextCells,
+      selectedCellIndex: selectedIndex,
+    );
     _undoHistory.add(stroke);
     _trimHistory(_undoHistory);
     notifyListeners();
@@ -147,6 +280,7 @@ class EditorController extends ChangeNotifier {
     nextCells[index] = const EditorCell();
     _state = _state.copyWith(cells: nextCells, selectedCellIndex: index);
     _recordCellChange(index, current);
+    _isCurrentLevelDirty = true;
     notifyListeners();
   }
 
@@ -192,6 +326,7 @@ class EditorController extends ChangeNotifier {
     nextCells[index] = updated;
     _state = _state.copyWith(cells: nextCells, selectedCellIndex: index);
     _recordCellChange(index, current);
+    _isCurrentLevelDirty = true;
     notifyListeners();
   }
 
@@ -260,9 +395,40 @@ class EditorController extends ChangeNotifier {
         a.hasStartMarker == b.hasStartMarker;
   }
 
+  bool _statesEqual(EditorState a, EditorState b) {
+    if (a.gridSize.width != b.gridSize.width ||
+        a.gridSize.height != b.gridSize.height) {
+      return false;
+    }
+    if (a.cells.length != b.cells.length) {
+      return false;
+    }
+    for (var i = 0; i < a.cells.length; i += 1) {
+      if (!_cellsEqual(a.cells[i], b.cells[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   void _trimHistory(List<EditorStrokeChange> history) {
     while (history.length > _maxHistoryDepth) {
       history.removeAt(0);
     }
+  }
+
+  void _applyLoadedState(ALevelPackLevel level) {
+    _state = _levelMapper.fromPersistedLevel(
+      level: level,
+      paletteColors: _state.paletteColors,
+      selectedColor: _state.selectedColor,
+      selectedTool: _state.selectedTool,
+    );
+    _undoHistory.clear();
+    _redoHistory.clear();
+    _strokeBeforeCells.clear();
+    _strokeChangedCells.clear();
+    _strokeTouchedCells.clear();
+    _eraseStrokeTouchedCells.clear();
   }
 }
