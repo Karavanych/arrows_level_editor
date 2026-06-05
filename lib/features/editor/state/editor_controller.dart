@@ -216,6 +216,38 @@ class EditorController extends ChangeNotifier {
     throw UnsupportedError('Reveal is not supported on this platform.');
   }
 
+  Future<void> deleteLevelById(String levelId) async {
+    final pack =
+        _openedPack ??
+        await _storageService.loadOrCreateDefaultPack(
+          paletteColors: _state.paletteColors,
+        );
+    final levels = pack.manifest.levels;
+    final targetIndex = levels.indexWhere((entry) => entry.id == levelId);
+    if (targetIndex < 0) {
+      return;
+    }
+
+    final reducedPack = pack.removeLevel(levelId);
+    _openedPack = reducedPack;
+
+    if (reducedPack.manifest.levels.isEmpty) {
+      await createLevel(
+        width: _state.gridSize.width,
+        height: _state.gridSize.height,
+        persistContext: false,
+      );
+      return;
+    }
+
+    final nextIndex = (targetIndex - 1).clamp(
+      0,
+      reducedPack.manifest.levels.length - 1,
+    );
+    final nextLevelId = reducedPack.manifest.levels[nextIndex].id;
+    await loadLevelFromDefaultPack(levelId: nextLevelId);
+  }
+
   void selectTool(EditorTool tool) {
     _state = _state.copyWith(selectedTool: tool);
     notifyListeners();

@@ -346,6 +346,34 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
+  Future<void> _handleDeleteLevel(String targetLevelId) async {
+    if (_isBusy) {
+      return;
+    }
+    final shouldDelete = await _askDeleteLevelConfirmation();
+    if (shouldDelete != true) {
+      return;
+    }
+
+    setState(() {
+      _isBusy = true;
+    });
+    try {
+      await _controller.deleteLevelById(targetLevelId);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to delete level: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
+    }
+  }
+
   Future<void> _blinkProblemCells(Set<int> cells) async {
     if (cells.isEmpty || !mounted) {
       return;
@@ -400,6 +428,28 @@ class _EditorScreenState extends State<EditorScreen> {
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
               child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Yes'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<bool?> _askDeleteLevelConfirmation() {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete level'),
+          content: const Text('Are you sure you want to delete this level?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('No'),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
@@ -757,6 +807,11 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
           tileColor: selected ? Colors.indigo.withValues(alpha: 0.08) : null,
           title: Text(level.id),
+          trailing: IconButton(
+            tooltip: 'Delete level',
+            onPressed: _isBusy ? null : () => _handleDeleteLevel(level.id),
+            icon: const Icon(Icons.delete_outline),
+          ),
           onTap: _isBusy ? null : () => _handleLevelSwitch(level.id),
         );
       },

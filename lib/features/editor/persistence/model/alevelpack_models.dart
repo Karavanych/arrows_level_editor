@@ -209,6 +209,16 @@ class ALevelPackDocument {
       levels: levels,
     );
   }
+
+  ALevelPackDocument removeLevel(String levelId) {
+    return ALevelPackDocument(
+      manifest: manifest.copyWith(
+        levels: manifest.levels.where((entry) => entry.id != levelId).toList(),
+      ),
+      palette: palette,
+      levels: levels.where((level) => level.id != levelId).toList(),
+    );
+  }
 }
 
 String _colorToRgbHex(Color color) {
