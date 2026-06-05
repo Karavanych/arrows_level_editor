@@ -689,29 +689,48 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Widget _buildRightPanelActions() {
+    final compactButtonStyle = _rightPanelButtonStyle();
+
     return Row(
       children: [
         Expanded(
           child: FilledButton(
+            style: compactButtonStyle,
             onPressed: _isBusy ? null : _handleSave,
-            child: const Text('Save'),
+            child: const Text('Save', maxLines: 1, softWrap: false),
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: OutlinedButton(
+            style: compactButtonStyle,
             onPressed: _isBusy ? null : _handleOpen,
-            child: const Text('Open'),
+            child: const Text('Open', maxLines: 1, softWrap: false),
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: OutlinedButton(
+            style: compactButtonStyle,
             onPressed: _isBusy ? null : _handleReveal,
-            child: const Text('Reveal'),
+            child: const Text('Reveal', maxLines: 1, softWrap: false),
           ),
         ),
       ],
+    );
+  }
+
+  ButtonStyle _rightPanelButtonStyle() {
+    return ButtonStyle(
+      minimumSize: WidgetStateProperty.all(const Size(0, 36)),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
+      padding: WidgetStateProperty.all(
+        const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      ),
+      textStyle: WidgetStateProperty.all(
+        const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
     );
   }
 
