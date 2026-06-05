@@ -1,8 +1,22 @@
 import 'package:arrows_level_editor/features/editor/editor_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:arrows_level_editor/app/window_state_manager.dart';
 
-class ArrowsLevelEditorApp extends StatelessWidget {
-  const ArrowsLevelEditorApp({super.key});
+class ArrowsLevelEditorApp extends StatefulWidget {
+  const ArrowsLevelEditorApp({super.key, this.windowStateManager});
+
+  final WindowStateManager? windowStateManager;
+
+  @override
+  State<ArrowsLevelEditorApp> createState() => _ArrowsLevelEditorAppState();
+}
+
+class _ArrowsLevelEditorAppState extends State<ArrowsLevelEditorApp> {
+  @override
+  void dispose() {
+    widget.windowStateManager?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
