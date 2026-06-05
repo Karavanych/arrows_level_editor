@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
 import 'package:arrows_level_editor/features/editor/persistence/alevelpack_storage_service.dart';
 import 'package:arrows_level_editor/features/editor/persistence/editor_level_mapper.dart';
+import 'package:arrows_level_editor/features/editor/persistence/level_id_generator.dart';
 import 'package:arrows_level_editor/features/editor/persistence/model/alevelpack_models.dart';
 import 'package:arrows_level_editor/features/editor/validation/editor_save_validation.dart';
 import 'package:flutter/material.dart';
@@ -10,11 +13,15 @@ class EditorController extends ChangeNotifier {
     ALevelPackStorageService? storageService,
     EditorLevelMapper? levelMapper,
     EditorSaveValidationService? saveValidationService,
+    EditorLevelIdGenerator? levelIdGenerator,
   }) : _state = EditorState.initial(),
        _storageService = storageService ?? ALevelPackStorageService(),
        _levelMapper = levelMapper ?? const EditorLevelMapper(),
        _saveValidationService =
-           saveValidationService ?? EditorSaveValidationService();
+           saveValidationService ?? EditorSaveValidationService(),
+       _levelIdGenerator = levelIdGenerator ?? EditorLevelIdGenerator(),
+       _currentLevelId = (levelIdGenerator ?? EditorLevelIdGenerator())
+           .generate();
 
   static const int _maxHistoryDepth = 3;
 
@@ -22,6 +29,7 @@ class EditorController extends ChangeNotifier {
   final ALevelPackStorageService _storageService;
   final EditorLevelMapper _levelMapper;
   final EditorSaveValidationService _saveValidationService;
+  final EditorLevelIdGenerator _levelIdGenerator;
   final Set<int> _strokeTouchedCells = {};
   final Set<int> _eraseStrokeTouchedCells = {};
   final List<EditorStrokeChange> _undoHistory = [];
@@ -29,7 +37,7 @@ class EditorController extends ChangeNotifier {
   final Map<int, EditorCell> _strokeBeforeCells = {};
   final Set<int> _strokeChangedCells = {};
   ALevelPackDocument? _openedPack;
-  String _currentLevelId = 'level_001';
+  String _currentLevelId;
   String? _lastOpenedLevelId;
   SaveValidationResult? _lastSaveValidationResult;
   bool _isCurrentLevelDirty = false;
@@ -135,6 +143,7 @@ class EditorController extends ChangeNotifier {
     );
     if (pack.levels.isEmpty) {
       _openedPack = pack;
+      _currentLevelId = levelId ?? _levelIdGenerator.generate();
       _isCurrentLevelDirty = false;
       notifyListeners();
       return;
@@ -156,6 +165,28 @@ class EditorController extends ChangeNotifier {
     _currentLevelId = selected.id;
     _isCurrentLevelDirty = false;
     notifyListeners();
+  }
+
+  Future<void> revealDefaultPackFolder() async {
+    final file = await _storageService.getDefaultPackFile();
+    final directory = Directory(file.parent.path);
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+
+    if (Platform.isMacOS) {
+      await Process.run('open', [directory.path]);
+      return;
+    }
+    if (Platform.isWindows) {
+      await Process.run('explorer', [directory.path]);
+      return;
+    }
+    if (Platform.isLinux) {
+      await Process.run('xdg-open', [directory.path]);
+      return;
+    }
+    throw UnsupportedError('Reveal is not supported on this platform.');
   }
 
   void selectTool(EditorTool tool) {

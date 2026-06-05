@@ -129,6 +129,29 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
+  Future<void> _handleReveal() async {
+    if (_isBusy) {
+      return;
+    }
+    setState(() {
+      _isBusy = true;
+    });
+    try {
+      await _controller.revealDefaultPackFolder();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to reveal pack folder: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
+    }
+  }
+
   Future<bool> _runSaveFlowWithValidation() async {
     var validation = _controller.validateCurrentLevelBeforeSave();
 
@@ -408,8 +431,6 @@ class _EditorScreenState extends State<EditorScreen> {
                           ),
                           const SizedBox(height: 16),
                           _buildDimensionInputs(),
-                          const SizedBox(height: 12),
-                          _buildFileActions(),
                           const SizedBox(height: 20),
                           Text(
                             'Tool',
@@ -503,26 +524,6 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-  Widget _buildFileActions() {
-    return Row(
-      children: [
-        Expanded(
-          child: OutlinedButton(
-            onPressed: _isBusy ? null : _handleOpen,
-            child: const Text('Open'),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: FilledButton(
-            onPressed: _isBusy ? null : _handleSave,
-            child: const Text('Save'),
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildToolSelector(EditorState state) {
     return Wrap(
       spacing: 8,
@@ -572,182 +573,78 @@ class _EditorScreenState extends State<EditorScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildPackSection(),
-        const Divider(height: 20),
-        _buildLevelsSection(),
-        const Divider(height: 20),
-        Expanded(child: _buildDebugPanel(state)),
-      ],
-    );
-  }
-
-  Widget _buildPackSection() {
-    final packName = _controller.currentPackName ?? 'Not opened yet';
-    final dirtyText = _controller.isCurrentLevelDirty ? 'Yes' : 'No';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Pack', style: Theme.of(context).textTheme.titleMedium),
+        Text('Current Level', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        Text('Name: $packName'),
-        const SizedBox(height: 4),
-        Text('Current level: ${_controller.currentLevelId}'),
-        const SizedBox(height: 4),
-        Text('Unsaved changes: $dirtyText'),
-        const SizedBox(height: 4),
-        Text('Last validation: ${_validationBrief()}'),
-      ],
-    );
-  }
-
-  Widget _buildLevelsSection() {
-    final levels = _controller.availableLevels;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
+        Text(
+          _controller.currentLevelId,
+          style: Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 12),
+        _buildRightPanelActions(),
+        const SizedBox(height: 16),
         Text('Levels', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        if (levels.isEmpty)
-          const Text('No levels in current pack.')
-        else
-          SizedBox(
-            height: 140,
-            child: ListView.separated(
-              itemCount: levels.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 6),
-              itemBuilder: (context, index) {
-                final level = levels[index];
-                final selected = level.id == _controller.currentLevelId;
-                return ListTile(
-                  dense: true,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    side: BorderSide(
-                      color: selected ? Colors.indigo : Colors.black12,
-                    ),
-                  ),
-                  tileColor: selected
-                      ? Colors.indigo.withValues(alpha: 0.08)
-                      : null,
-                  title: Text(level.id),
-                  subtitle: Text(level.path),
-                  onTap: _isBusy ? null : () => _handleLevelSwitch(level.id),
-                );
-              },
-            ),
-          ),
+        Expanded(child: _buildLevelsList()),
       ],
     );
   }
 
-  Widget _buildDebugPanel(EditorState state) {
-    final inactiveCount = state.cells.where((cell) => cell.isInactive).length;
-    final markerCount = state.cells.where((cell) => cell.hasStartMarker).length;
-    final paintedCount = state.cells
-        .where((cell) => cell.paintColor != null)
-        .length;
-    final selectedCell = _selectedCell(state);
-
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('State Preview', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 12),
-          Text('Grid: ${state.gridSize.width} x ${state.gridSize.height}'),
-          const Divider(height: 20),
-          Text('Selected tool: ${_toolLabel(state.selectedTool)}'),
-          const SizedBox(height: 8),
-          Text('Selected color: ${_colorLabel(state.selectedColor)}'),
-          const SizedBox(height: 8),
-          Text('Painted cells: $paintedCount'),
-          const SizedBox(height: 4),
-          Text('Inactive cells: $inactiveCount'),
-          const SizedBox(height: 4),
-          Text('Start markers: $markerCount'),
-          const Divider(height: 28),
-          Text('Selected Cell', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          if (selectedCell == null)
-            const Text('None')
-          else ...[
-            Text('Index: ${state.selectedCellIndex}'),
-            const SizedBox(height: 4),
-            Text('Color: ${_colorLabel(selectedCell.paintColor)}'),
-            const SizedBox(height: 4),
-            Text('Inactive: ${selectedCell.isInactive}'),
-            const SizedBox(height: 4),
-            Text('Start marker: ${selectedCell.hasStartMarker}'),
-          ],
-          const Divider(height: 28),
-          Text(
-            'Internal Preview',
-            style: Theme.of(context).textTheme.titleSmall,
+  Widget _buildRightPanelActions() {
+    return Row(
+      children: [
+        Expanded(
+          child: FilledButton(
+            onPressed: _isBusy ? null : _handleSave,
+            child: const Text('Save'),
           ),
-          const SizedBox(height: 8),
-          SelectableText(
-            _statePreview(state),
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: OutlinedButton(
+            onPressed: _isBusy ? null : _handleOpen,
+            child: const Text('Open'),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: OutlinedButton(
+            onPressed: _isBusy ? null : _handleReveal,
+            child: const Text('Reveal'),
+          ),
+        ),
+      ],
     );
   }
 
-  EditorCell? _selectedCell(EditorState state) {
-    final index = state.selectedCellIndex;
-    if (index == null || index < 0 || index >= state.cells.length) {
-      return null;
-    }
-    return state.cells[index];
-  }
-
-  String _statePreview(EditorState state) {
-    final editedCells = <String>[];
-    for (var index = 0; index < state.cells.length; index += 1) {
-      final cell = state.cells[index];
-      if (cell.paintColor == null && !cell.isInactive && !cell.hasStartMarker) {
-        continue;
-      }
-      editedCells.add(
-        '{index: $index, color: ${_colorLabel(cell.paintColor)}, '
-        'inactive: ${cell.isInactive}, start: ${cell.hasStartMarker}}',
+  Widget _buildLevelsList() {
+    final levels = _controller.availableLevels;
+    if (levels.isEmpty) {
+      return const Align(
+        alignment: Alignment.topLeft,
+        child: Text('No levels in current pack.'),
       );
-      if (editedCells.length == 12) {
-        break;
-      }
     }
 
-    return '''
-{
-  grid: ${state.gridSize.width}x${state.gridSize.height},
-  tool: ${_toolLabel(state.selectedTool)},
-  selectedColor: ${_colorLabel(state.selectedColor)},
-  selectedCell: ${state.selectedCellIndex},
-  editedCellsPreview: [
-    ${editedCells.isEmpty ? '// none' : editedCells.join(',\n    ')}
-  ]
-}''';
-  }
-
-  String _validationBrief() {
-    final validation = _controller.lastSaveValidationResult;
-    if (validation == null) {
-      return 'none';
-    }
-    final blocking = validation.problems
-        .where((problem) => problem.isBlocking)
-        .length;
-    return '$blocking blocking / ${validation.autoFixes.length} auto-fixes';
-  }
-
-  String _colorLabel(Color? color) {
-    if (color == null) {
-      return 'none';
-    }
-    return '#${color.toARGB32().toRadixString(16).padLeft(8, '0')}';
+    return ListView.separated(
+      itemCount: levels.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 6),
+      itemBuilder: (context, index) {
+        final level = levels[index];
+        final selected = level.id == _controller.currentLevelId;
+        return ListTile(
+          dense: true,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(color: selected ? Colors.indigo : Colors.black12),
+          ),
+          tileColor: selected ? Colors.indigo.withValues(alpha: 0.08) : null,
+          title: Text(level.id),
+          onTap: _isBusy ? null : () => _handleLevelSwitch(level.id),
+        );
+      },
+    );
   }
 
   String _toolLabel(EditorTool tool) {
