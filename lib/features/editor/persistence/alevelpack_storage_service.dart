@@ -108,11 +108,14 @@ class ALevelPackStorageService {
     required ALevelPackDocument source,
     required ALevelPackLevel level,
     String? packName,
+    String? lastOpenedLevelId,
   }) {
     final updated = source.upsertLevel(level);
     return ALevelPackDocument(
       manifest: updated.manifest.copyWith(
         name: packName ?? updated.manifest.name,
+        lastOpenedLevelId:
+            lastOpenedLevelId ?? updated.manifest.lastOpenedLevelId,
       ),
       palette: source.palette,
       levels: updated.levels,
@@ -126,6 +129,7 @@ class ALevelPackStorageService {
         version: _formatVersion,
         name: _defaultPackName,
         levels: [],
+        lastOpenedLevelId: null,
       ),
       palette: ALevelPackPalette(
         inactiveColor: const Color(0xFFFFFFFF),

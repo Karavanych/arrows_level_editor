@@ -52,9 +52,14 @@ class EditorController extends ChangeNotifier {
   bool get isCurrentLevelDirty => _isCurrentLevelDirty;
   String? get currentPackName => _openedPack?.manifest.name;
 
-  void generateGrid({required int width, required int height}) {
+  Future<void> createLevel({
+    required int width,
+    required int height,
+    bool persistContext = false,
+  }) async {
     final safeWidth = width.clamp(1, 200);
     final safeHeight = height.clamp(1, 200);
+    final nextLevelId = _levelIdGenerator.generate();
     _state = _state.copyWith(
       gridSize: EditorGridSize(width: safeWidth, height: safeHeight),
       cells: List<EditorCell>.filled(
@@ -67,8 +72,25 @@ class EditorController extends ChangeNotifier {
     _redoHistory.clear();
     _strokeBeforeCells.clear();
     _strokeChangedCells.clear();
+    _currentLevelId = nextLevelId;
     _isCurrentLevelDirty = true;
+
+    final pack =
+        _openedPack ??
+        await _storageService.loadOrCreateDefaultPack(
+          paletteColors: _state.paletteColors,
+        );
+    _openedPack = pack.ensureLevelEntry(nextLevelId);
+
+    if (persistContext) {
+      await _saveManifestSelectionOnly(currentLevelId: nextLevelId);
+    }
+
     notifyListeners();
+  }
+
+  Future<void> discardUnsavedChangesForCurrentLevel() async {
+    await loadLevelFromDefaultPack(levelId: _currentLevelId);
   }
 
   Future<void> saveCurrentLevelToDefaultPack({
@@ -95,6 +117,7 @@ class EditorController extends ChangeNotifier {
     final nextPack = _storageService.buildPackWithUpsertedLevel(
       source: existingPack,
       level: level,
+      lastOpenedLevelId: targetLevelId,
     );
 
     final file = await _storageService.getDefaultPackFile();
@@ -143,13 +166,16 @@ class EditorController extends ChangeNotifier {
     );
     if (pack.levels.isEmpty) {
       _openedPack = pack;
-      _currentLevelId = levelId ?? _levelIdGenerator.generate();
-      _isCurrentLevelDirty = false;
-      notifyListeners();
+      await createLevel(
+        width: _state.gridSize.width,
+        height: _state.gridSize.height,
+        persistContext: false,
+      );
       return;
     }
 
-    final targetLevelId = levelId ?? _currentLevelId;
+    final targetLevelId =
+        levelId ?? pack.manifest.lastOpenedLevelId ?? _currentLevelId;
     ALevelPackLevel? selected;
     for (final level in pack.levels) {
       if (level.id == targetLevelId) {
@@ -164,6 +190,7 @@ class EditorController extends ChangeNotifier {
     _lastOpenedLevelId = selected.id;
     _currentLevelId = selected.id;
     _isCurrentLevelDirty = false;
+    await _saveManifestSelectionOnly(currentLevelId: selected.id);
     notifyListeners();
   }
 
@@ -461,5 +488,22 @@ class EditorController extends ChangeNotifier {
     _strokeChangedCells.clear();
     _strokeTouchedCells.clear();
     _eraseStrokeTouchedCells.clear();
+  }
+
+  Future<void> _saveManifestSelectionOnly({
+    required String currentLevelId,
+  }) async {
+    final openedPack = _openedPack;
+    if (openedPack == null) {
+      return;
+    }
+    final file = await _storageService.getDefaultPackFile();
+    final nextPack = ALevelPackDocument(
+      manifest: openedPack.manifest.copyWith(lastOpenedLevelId: currentLevelId),
+      palette: openedPack.palette,
+      levels: openedPack.levels,
+    );
+    await _storageService.savePack(file: file, pack: nextPack);
+    _openedPack = nextPack;
   }
 }

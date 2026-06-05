@@ -6,12 +6,14 @@ class ALevelPackManifest {
     required this.version,
     required this.name,
     required this.levels,
+    this.lastOpenedLevelId,
   });
 
   final String format;
   final int version;
   final String name;
   final List<ALevelManifestEntry> levels;
+  final String? lastOpenedLevelId;
 
   Map<String, Object?> toJson() {
     return {
@@ -19,6 +21,7 @@ class ALevelPackManifest {
       'version': version,
       'name': name,
       'levels': levels.map((entry) => entry.toJson()).toList(),
+      if (lastOpenedLevelId != null) 'lastOpenedLevelId': lastOpenedLevelId,
     };
   }
 
@@ -31,6 +34,7 @@ class ALevelPackManifest {
       version: json['version'] as int? ?? 0,
       name: json['name'] as String? ?? '',
       levels: levelsJson.map(ALevelManifestEntry.fromJson).toList(),
+      lastOpenedLevelId: json['lastOpenedLevelId'] as String?,
     );
   }
 
@@ -39,12 +43,17 @@ class ALevelPackManifest {
     int? version,
     String? name,
     List<ALevelManifestEntry>? levels,
+    String? lastOpenedLevelId,
+    bool clearLastOpenedLevelId = false,
   }) {
     return ALevelPackManifest(
       format: format ?? this.format,
       version: version ?? this.version,
       name: name ?? this.name,
       levels: levels ?? this.levels,
+      lastOpenedLevelId: clearLastOpenedLevelId
+          ? null
+          : (lastOpenedLevelId ?? this.lastOpenedLevelId),
     );
   }
 }
@@ -181,6 +190,23 @@ class ALevelPackDocument {
       manifest: manifest.copyWith(levels: orderedManifestLevels),
       palette: palette,
       levels: nextLevels,
+    );
+  }
+
+  ALevelPackDocument ensureLevelEntry(String levelId) {
+    final hasEntry = manifest.levels.any((entry) => entry.id == levelId);
+    if (hasEntry) {
+      return this;
+    }
+    return ALevelPackDocument(
+      manifest: manifest.copyWith(
+        levels: [
+          ...manifest.levels,
+          ALevelManifestEntry(id: levelId, path: 'levels/$levelId'),
+        ],
+      ),
+      palette: palette,
+      levels: levels,
     );
   }
 }

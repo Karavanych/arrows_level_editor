@@ -62,13 +62,77 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  void _handleGenerate() {
+  Future<void> _handleCreateLevel() async {
+    if (_isBusy) {
+      return;
+    }
     final width = int.tryParse(_widthController.text);
     final height = int.tryParse(_heightController.text);
     if (width == null || height == null) {
       return;
     }
-    _controller.generateGrid(width: width, height: height);
+
+    if (_controller.isCurrentLevelDirty) {
+      final action = await _askCreateLevelDirtyAction();
+      if (action == _DirtyCreateLevelAction.cancel || action == null) {
+        return;
+      }
+      if (action == _DirtyCreateLevelAction.save) {
+        setState(() {
+          _isBusy = true;
+        });
+        try {
+          final saved = await _runSaveFlowWithValidation();
+          if (!saved) {
+            return;
+          }
+        } finally {
+          if (mounted) {
+            setState(() {
+              _isBusy = false;
+            });
+          }
+        }
+      }
+      if (action == _DirtyCreateLevelAction.discard) {
+        setState(() {
+          _isBusy = true;
+        });
+        try {
+          await _controller.discardUnsavedChangesForCurrentLevel();
+        } finally {
+          if (mounted) {
+            setState(() {
+              _isBusy = false;
+            });
+          }
+        }
+      }
+    }
+
+    setState(() {
+      _isBusy = true;
+    });
+    try {
+      await _controller.createLevel(width: width, height: height);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('New level created.')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to create level: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
+    }
   }
 
   Future<void> _handleOpen() async {
@@ -347,6 +411,39 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
+  Future<_DirtyCreateLevelAction?> _askCreateLevelDirtyAction() {
+    return showDialog<_DirtyCreateLevelAction>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Unsaved changes'),
+          content: const Text(
+            'Current level has unsaved changes. What do you want to do before creating a new level?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(
+                dialogContext,
+              ).pop(_DirtyCreateLevelAction.cancel),
+              child: const Text('Cancel'),
+            ),
+            OutlinedButton(
+              onPressed: () => Navigator.of(
+                dialogContext,
+              ).pop(_DirtyCreateLevelAction.discard),
+              child: const Text('Discard'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(_DirtyCreateLevelAction.save),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.red),
@@ -516,8 +613,8 @@ class _EditorScreenState extends State<EditorScreen> {
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: _handleGenerate,
-            child: const Text('Generate'),
+            onPressed: _isBusy ? null : _handleCreateLevel,
+            child: const Text('Create Level'),
           ),
         ),
       ],
@@ -660,3 +757,5 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 }
+
+enum _DirtyCreateLevelAction { save, discard, cancel }
