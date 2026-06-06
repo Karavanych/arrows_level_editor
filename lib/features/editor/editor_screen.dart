@@ -1,5 +1,6 @@
 import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
 import 'package:arrows_level_editor/features/editor/state/editor_controller.dart';
+import 'package:arrows_level_editor/features/editor/validation/editor_save_validation.dart';
 import 'package:arrows_level_editor/features/editor/widgets/editor_grid_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -220,19 +221,17 @@ class _EditorScreenState extends State<EditorScreen> {
       _isBusy = true;
     });
     try {
-      final validation = _controller.validateCurrentLevelBeforeSave();
-      if (validation.hasBlockingProblems) {
+      final passed = await _runCheckLevelValidationFlow();
+      if (!mounted) {
+        return;
+      }
+      if (!passed) {
         _controller.markCurrentLevelChecked(false);
-        final cells = validation.problems.expand((it) => it.cellIndices).toSet();
-        await _blinkProblemCells(cells);
-        if (!mounted) {
-          return;
-        }
-        _showErrorSnackBar('Check failed: fix highlighted issues.');
         return;
       }
 
       _controller.markCurrentLevelChecked(true);
+      await _controller.persistCurrentPackState();
       if (!mounted) {
         return;
       }
@@ -243,6 +242,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
+      _controller.markCurrentLevelChecked(false);
       _showErrorSnackBar('Failed to check level: $error');
     } finally {
       if (mounted) {
@@ -251,6 +251,87 @@ class _EditorScreenState extends State<EditorScreen> {
         });
       }
     }
+  }
+
+  Future<bool> _runCheckLevelValidationFlow() async {
+    var validation = _controller.validateCurrentLevelBeforeSave();
+
+    while (validation.hasBlockingProblems) {
+      final emptyProblems = validation.problems.where(
+        (problem) => problem.code == SaveValidationProblemCode.emptyCells,
+      );
+      if (emptyProblems.isNotEmpty) {
+        final cells = emptyProblems.expand((it) => it.cellIndices).toSet();
+        await _blinkProblemCells(cells);
+        if (!mounted) {
+          return false;
+        }
+        final shouldFill = await _askYesCancel(
+          title: 'Empty cells found',
+          message: 'Fill all empty cells as inactive?',
+        );
+        if (shouldFill != true) {
+          return false;
+        }
+        validation = _controller.applyAutoFixAndRevalidate(
+          SaveValidationAutoFixType.fillEmptyCellsAsInactive,
+        );
+        continue;
+      }
+
+      final missingStartProblems = validation.problems.where(
+        (problem) => problem.code == SaveValidationProblemCode.missingLineStart,
+      );
+      if (missingStartProblems.isNotEmpty) {
+        final cells = missingStartProblems
+            .expand((it) => it.cellIndices)
+            .toSet();
+        await _blinkProblemCells(cells);
+        if (!mounted) {
+          return false;
+        }
+        final hasAutoFix = validation.autoFixes.any(
+          (fix) => fix.type == SaveValidationAutoFixType.addTemporaryStarts,
+        );
+        if (!hasAutoFix) {
+          _showErrorSnackBar(
+            'Check failed: some lines have no temporary start candidate.',
+          );
+          return false;
+        }
+        final shouldAddStarts = await _askYesCancel(
+          title: 'Missing line starts',
+          message: 'Place starts automatically for lines without starts?',
+        );
+        if (shouldAddStarts != true) {
+          return false;
+        }
+        validation = _controller.applyAutoFixAndRevalidate(
+          SaveValidationAutoFixType.addTemporaryStarts,
+        );
+        continue;
+      }
+
+      final singleIslands = validation.problems.where(
+        (problem) =>
+            problem.code == SaveValidationProblemCode.singleCellColorIsland,
+      );
+      if (singleIslands.isNotEmpty) {
+        final cells = singleIslands.expand((it) => it.cellIndices).toSet();
+        await _blinkProblemCells(cells);
+        if (!mounted) {
+          return false;
+        }
+        _showErrorSnackBar(
+          'Check failed: single-cell color islands must be fixed manually.',
+        );
+        return false;
+      }
+
+      return false;
+    }
+
+    return true;
   }
 
   Future<void> _handleReveal() async {
@@ -379,6 +460,31 @@ class _EditorScreenState extends State<EditorScreen> {
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
               child: const Text('No'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Yes'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<bool?> _askYesCancel({
+    required String title,
+    required String message,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),

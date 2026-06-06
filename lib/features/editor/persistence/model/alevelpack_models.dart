@@ -123,12 +123,16 @@ class ALevelStartPoint {
 }
 
 class ALevelLevelMeta {
-  const ALevelLevelMeta({required this.startPoints});
+  const ALevelLevelMeta({required this.startPoints, this.checked = false});
 
   final List<ALevelStartPoint> startPoints;
+  final bool checked;
 
   Map<String, Object?> toJson() {
-    return {'startPoints': startPoints.map((point) => point.toJson()).toList()};
+    return {
+      'checked': checked,
+      'startPoints': startPoints.map((point) => point.toJson()).toList(),
+    };
   }
 
   factory ALevelLevelMeta.fromJson(Map<String, dynamic> json) {
@@ -137,15 +141,23 @@ class ALevelLevelMeta {
         .map(ALevelStartPoint.fromJson)
         .toList();
 
-    return ALevelLevelMeta(startPoints: startPoints);
+    return ALevelLevelMeta(
+      checked: json['checked'] as bool? ?? false,
+      startPoints: startPoints,
+    );
   }
 }
 
 class ALevelBoardCell {
-  const ALevelBoardCell({required this.isInactive, this.color});
+  const ALevelBoardCell({
+    required this.isInactive,
+    this.color,
+    this.isEmpty = false,
+  });
 
   final bool isInactive;
   final Color? color;
+  final bool isEmpty;
 }
 
 class ALevelPackLevel {

@@ -7,6 +7,7 @@ import 'package:arrows_level_editor/features/editor/persistence/level_id_generat
 import 'package:arrows_level_editor/features/editor/persistence/model/alevelpack_models.dart';
 import 'package:arrows_level_editor/features/editor/validation/editor_save_validation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 
 class EditorController extends ChangeNotifier {
   EditorController({
@@ -21,7 +22,12 @@ class EditorController extends ChangeNotifier {
            saveValidationService ?? EditorSaveValidationService(),
        _levelIdGenerator = levelIdGenerator ?? EditorLevelIdGenerator(),
        _currentLevelId = (levelIdGenerator ?? EditorLevelIdGenerator())
-           .generate();
+           .generate() {
+    WidgetsBinding.instance.addObserver(_lifecycleObserver);
+    _lifecycleObserver._onAppDetached = () {
+      saveCurrentLevelToDefaultPack();
+    };
+  }
 
   static const int _maxHistoryDepth = 3;
 
@@ -44,6 +50,7 @@ class EditorController extends ChangeNotifier {
   final Map<String, EditorState> _levelDraftStates = {};
   final Map<String, bool> _levelDirtyStates = {};
   final Map<String, bool> _levelCheckedStates = {};
+  final _EditorLifecycleObserver _lifecycleObserver = _EditorLifecycleObserver();
 
   EditorState get state => _state;
   String get currentLevelId => _currentLevelId;
@@ -65,7 +72,6 @@ class EditorController extends ChangeNotifier {
   Future<void> createLevel({
     required int width,
     required int height,
-    bool persistContext = false,
   }) async {
     final safeWidth = width.clamp(1, 200);
     final safeHeight = height.clamp(1, 200);
@@ -95,17 +101,12 @@ class EditorController extends ChangeNotifier {
         );
     _openedPack = pack.ensureLevelEntry(nextLevelId);
 
-    if (persistContext) {
-      await _saveManifestSelectionOnly(currentLevelId: nextLevelId);
-    }
-
     notifyListeners();
   }
 
   Future<void> recreateCurrentLevel({
     required int width,
     required int height,
-    bool persistContext = false,
   }) async {
     final safeWidth = width.clamp(1, 200);
     final safeHeight = height.clamp(1, 200);
@@ -135,10 +136,6 @@ class EditorController extends ChangeNotifier {
         );
     _openedPack = pack.ensureLevelEntry(_currentLevelId);
 
-    if (persistContext) {
-      await _saveManifestSelectionOnly(currentLevelId: _currentLevelId);
-    }
-
     notifyListeners();
   }
 
@@ -154,6 +151,7 @@ class EditorController extends ChangeNotifier {
     final level = _levelMapper.toPersistedLevel(
       levelId: targetLevelId,
       state: _state,
+      checked: _levelCheckedStates[targetLevelId] ?? false,
     );
 
     final existingPack = await _storageService.loadOrCreateDefaultPack(
@@ -181,6 +179,13 @@ class EditorController extends ChangeNotifier {
     _levelDirtyStates[_currentLevelId] = false;
     _storeCurrentLevelDraft();
     notifyListeners();
+  }
+
+  Future<void> persistCurrentPackState() async {
+    if (_openedPack == null) {
+      return;
+    }
+    await saveCurrentLevelToDefaultPack();
   }
 
   SaveValidationResult validateCurrentLevelBeforeSave() {
@@ -223,7 +228,6 @@ class EditorController extends ChangeNotifier {
       await createLevel(
         width: _state.gridSize.width,
         height: _state.gridSize.height,
-        persistContext: false,
       );
       return;
     }
@@ -241,13 +245,13 @@ class EditorController extends ChangeNotifier {
 
     _applyLoadedState(selected);
     _openedPack = pack;
+    _restoreCheckedStatesFromPack(pack);
     _lastOpenedLevelId = selected.id;
     _currentLevelId = selected.id;
     _isCurrentLevelDirty = false;
     _levelDirtyStates[_currentLevelId] = false;
     _levelCheckedStates.putIfAbsent(_currentLevelId, () => false);
     _storeCurrentLevelDraft();
-    await _saveManifestSelectionOnly(currentLevelId: selected.id);
     notifyListeners();
   }
 
@@ -256,6 +260,7 @@ class EditorController extends ChangeNotifier {
       return;
     }
 
+    await persistCurrentPackState();
     _storeCurrentLevelDraft();
     _levelDirtyStates[_currentLevelId] = _isCurrentLevelDirty;
 
@@ -311,9 +316,11 @@ class EditorController extends ChangeNotifier {
     if (targetIndex < 0) {
       return;
     }
+    final deletedCurrentLevel = levelId == _currentLevelId;
 
     final reducedPack = pack.removeLevel(levelId);
     _openedPack = reducedPack;
+    _restoreCheckedStatesFromPack(reducedPack);
     _levelDraftStates.remove(levelId);
     _levelDirtyStates.remove(levelId);
     _levelCheckedStates.remove(levelId);
@@ -322,17 +329,49 @@ class EditorController extends ChangeNotifier {
       await createLevel(
         width: _state.gridSize.width,
         height: _state.gridSize.height,
-        persistContext: false,
       );
       return;
     }
 
-    final nextIndex = (targetIndex - 1).clamp(
-      0,
-      reducedPack.manifest.levels.length - 1,
-    );
-    final nextLevelId = reducedPack.manifest.levels[nextIndex].id;
-    await loadLevelFromDefaultPack(levelId: nextLevelId);
+    if (deletedCurrentLevel) {
+      final previousIndex = targetIndex - 1;
+      final fallbackIndex = previousIndex >= 0 ? previousIndex : 0;
+      final fallbackLevelId = reducedPack.manifest.levels[fallbackIndex].id;
+
+      final draftedFallbackState = _levelDraftStates[fallbackLevelId];
+      if (draftedFallbackState != null) {
+        _state = draftedFallbackState.copyWith(
+          cells: List<EditorCell>.from(draftedFallbackState.cells),
+          paletteColors: List<Color>.from(draftedFallbackState.paletteColors),
+        );
+        _undoHistory.clear();
+        _redoHistory.clear();
+        _strokeBeforeCells.clear();
+        _strokeChangedCells.clear();
+        _strokeTouchedCells.clear();
+        _eraseStrokeTouchedCells.clear();
+      } else {
+        ALevelPackLevel? fallbackLevel;
+        for (final level in reducedPack.levels) {
+          if (level.id == fallbackLevelId) {
+            fallbackLevel = level;
+            break;
+          }
+        }
+        if (fallbackLevel != null) {
+          _applyLoadedState(fallbackLevel);
+        }
+      }
+
+      _currentLevelId = fallbackLevelId;
+      _lastOpenedLevelId = fallbackLevelId;
+      _isCurrentLevelDirty = _levelDirtyStates[fallbackLevelId] ?? false;
+      _levelCheckedStates.putIfAbsent(fallbackLevelId, () => false);
+      _storeCurrentLevelDraft();
+    }
+
+    _openedPack = reducedPack;
+    notifyListeners();
   }
 
   bool isLevelChecked(String levelId) => _levelCheckedStates[levelId] ?? false;
@@ -630,20 +669,30 @@ class EditorController extends ChangeNotifier {
     );
   }
 
-  Future<void> _saveManifestSelectionOnly({
-    required String currentLevelId,
-  }) async {
-    final openedPack = _openedPack;
-    if (openedPack == null) {
-      return;
+  void _restoreCheckedStatesFromPack(ALevelPackDocument pack) {
+    final next = <String, bool>{};
+    for (final level in pack.levels) {
+      next[level.id] = level.meta.checked;
     }
-    final file = await _storageService.getDefaultPackFile();
-    final nextPack = ALevelPackDocument(
-      manifest: openedPack.manifest.copyWith(lastOpenedLevelId: currentLevelId),
-      palette: openedPack.palette,
-      levels: openedPack.levels,
-    );
-    await _storageService.savePack(file: file, pack: nextPack);
-    _openedPack = nextPack;
+    _levelCheckedStates
+      ..clear()
+      ..addAll(next);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(_lifecycleObserver);
+    super.dispose();
+  }
+}
+
+class _EditorLifecycleObserver with WidgetsBindingObserver {
+  VoidCallback? _onAppDetached;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      _onAppDetached?.call();
+    }
   }
 }

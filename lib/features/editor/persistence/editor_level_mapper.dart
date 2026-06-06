@@ -10,6 +10,7 @@ class EditorLevelMapper {
   ALevelPackLevel toPersistedLevel({
     required String levelId,
     required EditorState state,
+    bool checked = false,
   }) {
     final boardCells = <ALevelBoardCell>[];
     final startPoints = <ALevelStartPoint>[];
@@ -31,9 +32,8 @@ class EditorLevelMapper {
 
       final color = cell.paintColor;
       if (color == null) {
-        throw StateError(
-          'Cannot save level "$levelId": empty cell found at ($x, $y).',
-        );
+        boardCells.add(const ALevelBoardCell(isInactive: false, isEmpty: true));
+        continue;
       }
 
       boardCells.add(ALevelBoardCell(isInactive: false, color: color));
@@ -44,7 +44,7 @@ class EditorLevelMapper {
       width: state.gridSize.width,
       height: state.gridSize.height,
       boardCells: boardCells,
-      meta: ALevelLevelMeta(startPoints: startPoints),
+      meta: ALevelLevelMeta(startPoints: startPoints, checked: checked),
     );
   }
 
@@ -56,6 +56,10 @@ class EditorLevelMapper {
   }) {
     final cells = <EditorCell>[];
     for (final boardCell in level.boardCells) {
+      if (boardCell.isEmpty) {
+        cells.add(const EditorCell());
+        continue;
+      }
       if (boardCell.isInactive) {
         cells.add(const EditorCell(isInactive: true));
       } else {

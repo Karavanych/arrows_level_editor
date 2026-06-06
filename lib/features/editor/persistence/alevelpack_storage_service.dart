@@ -205,6 +205,10 @@ class ALevelPackStorageService {
           pixel.g.toInt(),
           pixel.b.toInt(),
         );
+      if (pixel.a.toInt() == 0) {
+        boardCells.add(const ALevelBoardCell(isInactive: false, isEmpty: true));
+        continue;
+      }
         final rgb = color.toARGB32() & 0x00FFFFFF;
         if (rgb == 0x00FFFFFF) {
           boardCells.add(const ALevelBoardCell(isInactive: true));
@@ -236,8 +240,10 @@ class ALevelPackStorageService {
       final x = index % level.width;
       final y = index ~/ level.width;
       final cell = level.boardCells[index];
-      final color = cell.isInactive ? const Color(0xFFFFFFFF) : cell.color;
-      if (!cell.isInactive && color == null) {
+      final color = cell.isInactive
+          ? const Color(0xFFFFFFFF)
+          : (cell.isEmpty ? const Color(0x00000000) : cell.color);
+      if (!cell.isInactive && !cell.isEmpty && color == null) {
         throw StateError(
           'Non-inactive cell at ($x,$y) in ${level.id} has null color.',
         );
