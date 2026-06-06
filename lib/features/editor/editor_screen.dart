@@ -1,6 +1,5 @@
 import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
 import 'package:arrows_level_editor/features/editor/state/editor_controller.dart';
-import 'package:arrows_level_editor/features/editor/validation/editor_save_validation.dart';
 import 'package:arrows_level_editor/features/editor/widgets/editor_grid_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -72,6 +71,28 @@ class _EditorScreenState extends State<EditorScreen> {
       return;
     }
 
+    if (_controller.isCurrentLevelCompletelyEmpty) {
+      setState(() {
+        _isBusy = true;
+      });
+      try {
+        await _controller.recreateCurrentLevel(width: width, height: height);
+        _controller.markCurrentLevelChecked(false);
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+        _showErrorSnackBar('Failed to recreate level: $error');
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isBusy = false;
+          });
+        }
+      }
+      return;
+    }
+
     if (_controller.isCurrentLevelDirty) {
       final action = await _askCreateLevelDirtyAction();
       if (action == _DirtyCreateLevelAction.cancel || action == null) {
@@ -82,10 +103,7 @@ class _EditorScreenState extends State<EditorScreen> {
           _isBusy = true;
         });
         try {
-          final saved = await _runSaveFlowWithValidation();
-          if (!saved) {
-            return;
-          }
+          await _controller.saveCurrentLevelToDefaultPack();
         } finally {
           if (mounted) {
             setState(() {
@@ -115,6 +133,7 @@ class _EditorScreenState extends State<EditorScreen> {
     });
     try {
       await _controller.createLevel(width: width, height: height);
+      _controller.markCurrentLevelChecked(false);
       if (!mounted) {
         return;
       }
@@ -172,8 +191,8 @@ class _EditorScreenState extends State<EditorScreen> {
       _isBusy = true;
     });
     try {
-      final saved = await _runSaveFlowWithValidation();
-      if (!mounted || !saved) {
+      await _controller.saveCurrentLevelToDefaultPack();
+      if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(
@@ -184,6 +203,47 @@ class _EditorScreenState extends State<EditorScreen> {
         return;
       }
       _showErrorSnackBar('Failed to save level: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleCheckLevel() async {
+    if (_isBusy) {
+      return;
+    }
+    setState(() {
+      _isBusy = true;
+    });
+    try {
+      final validation = _controller.validateCurrentLevelBeforeSave();
+      if (validation.hasBlockingProblems) {
+        _controller.markCurrentLevelChecked(false);
+        final cells = validation.problems.expand((it) => it.cellIndices).toSet();
+        await _blinkProblemCells(cells);
+        if (!mounted) {
+          return;
+        }
+        _showErrorSnackBar('Check failed: fix highlighted issues.');
+        return;
+      }
+
+      _controller.markCurrentLevelChecked(true);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Level check passed.')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to check level: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -216,122 +276,16 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  Future<bool> _runSaveFlowWithValidation() async {
-    var validation = _controller.validateCurrentLevelBeforeSave();
-
-    while (validation.hasBlockingProblems) {
-      final emptyProblems = validation.problems.where(
-        (problem) => problem.code == SaveValidationProblemCode.emptyCells,
-      );
-      if (emptyProblems.isNotEmpty) {
-        final cells = emptyProblems.expand((it) => it.cellIndices).toSet();
-        await _blinkProblemCells(cells);
-        if (!mounted) {
-          return false;
-        }
-        final yes = await _askYesCancel(
-          title: 'Empty cells found',
-          message: 'Fill all empty cells as inactive and retry save?',
-        );
-        if (yes != true) {
-          return false;
-        }
-        validation = _controller.applyAutoFixAndRevalidate(
-          SaveValidationAutoFixType.fillEmptyCellsAsInactive,
-        );
-        continue;
-      }
-
-      final missingStartProblems = validation.problems.where(
-        (problem) => problem.code == SaveValidationProblemCode.missingLineStart,
-      );
-      if (missingStartProblems.isNotEmpty) {
-        final cells = missingStartProblems
-            .expand((it) => it.cellIndices)
-            .toSet();
-        await _blinkProblemCells(cells);
-        if (!mounted) {
-          return false;
-        }
-        final hasAutoFix = validation.autoFixes.any(
-          (fix) => fix.type == SaveValidationAutoFixType.addTemporaryStarts,
-        );
-        if (!hasAutoFix) {
-          _showErrorSnackBar(
-            'Save blocked: some lines have no temporary start candidate.',
-          );
-          return false;
-        }
-        final yes = await _askYesCancel(
-          title: 'Missing line starts',
-          message: 'Place starts automatically for lines without starts?',
-        );
-        if (yes != true) {
-          return false;
-        }
-        validation = _controller.applyAutoFixAndRevalidate(
-          SaveValidationAutoFixType.addTemporaryStarts,
-        );
-        continue;
-      }
-
-      final singleIslands = validation.problems.where(
-        (problem) =>
-            problem.code == SaveValidationProblemCode.singleCellColorIsland,
-      );
-      if (singleIslands.isNotEmpty) {
-        final cells = singleIslands.expand((it) => it.cellIndices).toSet();
-        await _blinkProblemCells(cells);
-        if (!mounted) {
-          return false;
-        }
-        _showErrorSnackBar(
-          'Save blocked: single-cell color islands must be fixed manually.',
-        );
-      }
-      return false;
-    }
-
-    await _controller.saveCurrentLevelToDefaultPack(skipValidation: true);
-    return true;
-  }
-
   Future<void> _handleLevelSwitch(String targetLevelId) async {
     if (_isBusy || targetLevelId == _controller.currentLevelId) {
       return;
-    }
-
-    if (_controller.isCurrentLevelDirty) {
-      final shouldSave = await _askYesCancel(
-        title: 'Unsaved changes',
-        message: 'Save current level before switching?',
-      );
-      if (shouldSave != true) {
-        return;
-      }
-
-      setState(() {
-        _isBusy = true;
-      });
-      try {
-        final saved = await _runSaveFlowWithValidation();
-        if (!saved) {
-          return;
-        }
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isBusy = false;
-          });
-        }
-      }
     }
 
     setState(() {
       _isBusy = true;
     });
     try {
-      await _controller.loadLevelFromDefaultPack(levelId: targetLevelId);
+      await _controller.switchToLevel(targetLevelId);
     } catch (error) {
       if (!mounted) {
         return;
@@ -412,31 +366,6 @@ class _EditorScreenState extends State<EditorScreen> {
       _isBlinkOn = false;
       _highlightedErrorCells.clear();
     });
-  }
-
-  Future<bool?> _askYesCancel({
-    required String title,
-    required String message,
-  }) {
-    return showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(title),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Yes'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   Future<bool?> _askDeleteLevelConfirmation() {
@@ -575,6 +504,13 @@ class _EditorScreenState extends State<EditorScreen> {
                           Text(
                             'Arrows Level Editor',
                             style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 12),
+                          Center(
+                            child: FilledButton(
+                              onPressed: _isBusy ? null : _handleCheckLevel,
+                              child: const Text('Check Level'),
+                            ),
                           ),
                           const SizedBox(height: 16),
                           _buildDimensionInputs(),
@@ -806,7 +742,19 @@ class _EditorScreenState extends State<EditorScreen> {
             side: BorderSide(color: selected ? Colors.indigo : Colors.black12),
           ),
           tileColor: selected ? Colors.indigo.withValues(alpha: 0.08) : null,
-          title: Text(level.id),
+          title: Row(
+            children: [
+              if (_controller.isLevelChecked(level.id)) ...[
+                const Icon(
+                  Icons.check_circle,
+                  size: 18,
+                  color: Colors.green,
+                ),
+                const SizedBox(width: 6),
+              ],
+              Expanded(child: Text(level.id)),
+            ],
+          ),
           trailing: IconButton(
             tooltip: 'Delete level',
             onPressed: _isBusy ? null : () => _handleDeleteLevel(level.id),
