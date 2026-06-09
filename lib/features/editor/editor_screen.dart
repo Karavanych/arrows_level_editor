@@ -1,5 +1,6 @@
 import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
 import 'package:arrows_level_editor/features/editor/state/editor_controller.dart';
+import 'package:arrows_level_editor/features/editor/validation/editor_check_preview_simulation.dart';
 import 'package:arrows_level_editor/features/editor/validation/editor_save_validation.dart';
 import 'package:arrows_level_editor/features/editor/widgets/editor_grid_view.dart';
 import 'package:flutter/material.dart';
@@ -28,6 +29,8 @@ class _EditorScreenState extends State<EditorScreen> {
   String? _lastSyncedLevelId;
   int? _lastSyncedLevelWidth;
   int? _lastSyncedLevelHeight;
+  final EditorCheckPreviewSimulationService _checkPreviewSimulationService =
+      EditorCheckPreviewSimulationService();
 
   @override
   void initState() {
@@ -233,6 +236,15 @@ class _EditorScreenState extends State<EditorScreen> {
         return;
       }
 
+      final previewPassed = await _runFinalCheckPreviewSimulation();
+      if (!mounted) {
+        return;
+      }
+      if (!previewPassed) {
+        _controller.markCurrentLevelChecked(false);
+        return;
+      }
+
       _controller.markCurrentLevelChecked(true);
       await _controller.persistCurrentPackState();
       if (!mounted) {
@@ -334,6 +346,161 @@ class _EditorScreenState extends State<EditorScreen> {
       return false;
     }
 
+    return true;
+  }
+
+  Future<bool> _runFinalCheckPreviewSimulation() async {
+    final baseState = _controller.state.copyWith(
+      cells: List<EditorCell>.from(_controller.state.cells),
+      paletteColors: List<Color>.from(_controller.state.paletteColors),
+    );
+    final previewStateNotifier = ValueNotifier<EditorState>(baseState);
+    final statusNotifier = ValueNotifier<String>('running');
+
+    Future<CheckPreviewSimulationOutcome> runOneAttempt() async {
+      return _checkPreviewSimulationService.run(
+        baseState: baseState,
+        onStep: (state, status) {
+          previewStateNotifier.value = state;
+          statusNotifier.value = status;
+        },
+        onBlocked: () async {
+          final decision = await _askYesCancel(
+            title: 'Lines block each other',
+            message: 'Lines block each other. Try opposite start points?',
+          );
+          return decision == true;
+        },
+      );
+    }
+
+    final result = await showDialog<CheckPreviewSimulationOutcome>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        Future<CheckPreviewSimulationOutcome>? pendingRun;
+
+        Future<void> ensureRun() async {
+          pendingRun ??= runOneAttempt();
+          final outcome = await pendingRun!;
+          if (!dialogContext.mounted) {
+            return;
+          }
+          statusNotifier.value = outcome.passed ? 'passed' : 'failed';
+        }
+
+        ensureRun();
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> retry() async {
+              statusNotifier.value = 'running';
+              previewStateNotifier.value = baseState;
+              pendingRun = runOneAttempt();
+              final outcome = await pendingRun!;
+              if (!dialogContext.mounted) {
+                return;
+              }
+              statusNotifier.value = outcome.passed ? 'passed' : 'failed';
+              setDialogState(() {});
+            }
+
+            return Dialog(
+              child: SizedBox(
+                width: 760,
+                height: 720,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Check Level Preview',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 8),
+                      ValueListenableBuilder<String>(
+                        valueListenable: statusNotifier,
+                        builder: (context, status, child) {
+                          return Text('Status: $status');
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: Container(
+                          color: const Color(0xFFF5F5F5),
+                          child: ValueListenableBuilder<EditorState>(
+                            valueListenable: previewStateNotifier,
+                            builder: (context, previewState, child) {
+                              return EditorGridView(
+                                state: previewState,
+                                onStrokeStart: (_) {},
+                                onCellDrag: (_) {},
+                                onStrokeEnd: () {},
+                                onEraseStrokeStart: (_) {},
+                                onEraseCellDrag: (_) {},
+                                onEraseStrokeEnd: () {},
+                                onEditorInteractionStart: () {},
+                                onColorPick: (_) {},
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          OutlinedButton(
+                            onPressed: retry,
+                            child: const Text('Retry'),
+                          ),
+                          const Spacer(),
+                          ValueListenableBuilder<String>(
+                            valueListenable: statusNotifier,
+                            builder: (context, status, child) {
+                              if (status != 'passed') {
+                                return FilledButton(
+                                  onPressed: null,
+                                  child: const Text('Apply & Close'),
+                                );
+                              }
+                              return FilledButton(
+                                onPressed: () async {
+                                  final outcome = await pendingRun;
+                                  if (!dialogContext.mounted || outcome == null) {
+                                    return;
+                                  }
+                                  Navigator.of(dialogContext).pop(outcome);
+                                },
+                                child: const Text('Apply & Close'),
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton(
+                            onPressed: () => Navigator.of(dialogContext).pop(),
+                            child: const Text('Close'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    previewStateNotifier.dispose();
+    statusNotifier.dispose();
+
+    if (result == null || !result.passed) {
+      return false;
+    }
+
+    _controller.replaceCurrentLevelStartMarkersFromState(result.startPlanState);
     return true;
   }
 
@@ -931,6 +1098,10 @@ class _EditorScreenState extends State<EditorScreen> {
       onReorder: _handleLevelsReorder,
       itemBuilder: (context, index) {
         final level = levels[index];
+        final levelSize = _controller.levelGridSizeById(level.id);
+        final levelSizePrefix = levelSize == null
+            ? '?x?'
+            : '${levelSize.width}x${levelSize.height}';
         final selected = level.id == _controller.currentLevelId;
         return Padding(
           key: ValueKey(level.id),
@@ -952,7 +1123,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                   const SizedBox(width: 6),
                 ],
-                Expanded(child: Text(level.id)),
+                Expanded(child: Text('$levelSizePrefix ${level.id}')),
               ],
             ),
             trailing: Row(

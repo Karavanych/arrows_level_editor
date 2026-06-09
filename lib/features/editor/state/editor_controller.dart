@@ -408,6 +408,23 @@ class EditorController extends ChangeNotifier {
 
   bool isLevelChecked(String levelId) => _levelCheckedStates[levelId] ?? false;
 
+  EditorGridSize? levelGridSizeById(String levelId) {
+    final draftedState = _levelDraftStates[levelId];
+    if (draftedState != null) {
+      return draftedState.gridSize;
+    }
+    final pack = _openedPack;
+    if (pack == null) {
+      return null;
+    }
+    for (final level in pack.levels) {
+      if (level.id == levelId) {
+        return EditorGridSize(width: level.width, height: level.height);
+      }
+    }
+    return null;
+  }
+
   void markCurrentLevelChecked(bool checked) {
     _levelCheckedStates[_currentLevelId] = checked;
     notifyListeners();
@@ -445,6 +462,30 @@ class EditorController extends ChangeNotifier {
     _undoHistory.add(EditorStrokeChange(changes: changes));
     _trimHistory(_undoHistory);
     _redoHistory.clear();
+    _markCurrentLevelEdited();
+    notifyListeners();
+  }
+
+  void replaceCurrentLevelStartMarkersFromState(EditorState sourceState) {
+    if (sourceState.cells.length != _state.cells.length) {
+      return;
+    }
+    final nextCells = List<EditorCell>.from(_state.cells);
+    var changed = false;
+    for (var index = 0; index < nextCells.length; index += 1) {
+      final current = nextCells[index];
+      final source = sourceState.cells[index];
+      if (current.hasStartMarker == source.hasStartMarker) {
+        continue;
+      }
+      nextCells[index] = current.copyWith(hasStartMarker: source.hasStartMarker);
+      changed = true;
+    }
+    if (!changed) {
+      return;
+    }
+
+    _state = _state.copyWith(cells: nextCells, clearSelectedCell: true);
     _markCurrentLevelEdited();
     notifyListeners();
   }
