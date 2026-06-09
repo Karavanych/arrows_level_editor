@@ -188,15 +188,31 @@ class ALevelPackDocument {
   final List<ALevelPackLevel> levels;
 
   ALevelPackDocument upsertLevel(ALevelPackLevel level) {
-    final nextLevels = <ALevelPackLevel>[
-      ...levels.where((existing) => existing.id != level.id),
-      level,
-    ];
+    final existingLevelIndex = levels.indexWhere(
+      (existing) => existing.id == level.id,
+    );
+    final nextLevels = List<ALevelPackLevel>.from(levels);
+    if (existingLevelIndex >= 0) {
+      nextLevels[existingLevelIndex] = level;
+    } else {
+      nextLevels.add(level);
+    }
 
-    final orderedManifestLevels = <ALevelManifestEntry>[
-      ...manifest.levels.where((entry) => entry.id != level.id),
-      ALevelManifestEntry(id: level.id, path: 'levels/${level.id}'),
-    ];
+    final existingManifestIndex = manifest.levels.indexWhere(
+      (entry) => entry.id == level.id,
+    );
+    final orderedManifestLevels = List<ALevelManifestEntry>.from(
+      manifest.levels,
+    );
+    final manifestEntry = ALevelManifestEntry(
+      id: level.id,
+      path: 'levels/${level.id}',
+    );
+    if (existingManifestIndex >= 0) {
+      orderedManifestLevels[existingManifestIndex] = manifestEntry;
+    } else {
+      orderedManifestLevels.add(manifestEntry);
+    }
 
     return ALevelPackDocument(
       manifest: manifest.copyWith(levels: orderedManifestLevels),

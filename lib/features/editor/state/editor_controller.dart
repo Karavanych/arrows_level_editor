@@ -154,9 +154,11 @@ class EditorController extends ChangeNotifier {
       checked: _levelCheckedStates[targetLevelId] ?? false,
     );
 
-    final existingPack = await _storageService.loadOrCreateDefaultPack(
-      paletteColors: _state.paletteColors,
-    );
+    final existingPack =
+        _openedPack ??
+        await _storageService.loadOrCreateDefaultPack(
+          paletteColors: _state.paletteColors,
+        );
     final nextPack = _storageService.buildPackWithUpsertedLevel(
       source: existingPack,
       level: level,
@@ -319,13 +321,16 @@ class EditorController extends ChangeNotifier {
     final deletedCurrentLevel = levelId == _currentLevelId;
 
     final reducedPack = pack.removeLevel(levelId);
-    _openedPack = reducedPack;
     _restoreCheckedStatesFromPack(reducedPack);
     _levelDraftStates.remove(levelId);
     _levelDirtyStates.remove(levelId);
     _levelCheckedStates.remove(levelId);
 
     if (reducedPack.manifest.levels.isEmpty) {
+      _openedPack = reducedPack;
+      await _persistPackDocument(
+        reducedPack.copyWithManifest(clearLastOpenedLevelId: true),
+      );
       await createLevel(
         width: _state.gridSize.width,
         height: _state.gridSize.height,
@@ -368,9 +373,15 @@ class EditorController extends ChangeNotifier {
       _isCurrentLevelDirty = _levelDirtyStates[fallbackLevelId] ?? false;
       _levelCheckedStates.putIfAbsent(fallbackLevelId, () => false);
       _storeCurrentLevelDraft();
+    } else if (_lastOpenedLevelId == levelId) {
+      _lastOpenedLevelId = _currentLevelId;
     }
 
-    _openedPack = reducedPack;
+    final persistedReducedPack = reducedPack.copyWithManifest(
+      lastOpenedLevelId: _lastOpenedLevelId ?? _currentLevelId,
+    );
+    _openedPack = persistedReducedPack;
+    await _persistPackDocument(persistedReducedPack);
     notifyListeners();
   }
 
@@ -679,10 +690,31 @@ class EditorController extends ChangeNotifier {
       ..addAll(next);
   }
 
+  Future<void> _persistPackDocument(ALevelPackDocument pack) async {
+    final file = await _storageService.getDefaultPackFile();
+    await _storageService.savePack(file: file, pack: pack);
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(_lifecycleObserver);
     super.dispose();
+  }
+}
+
+extension on ALevelPackDocument {
+  ALevelPackDocument copyWithManifest({
+    String? lastOpenedLevelId,
+    bool clearLastOpenedLevelId = false,
+  }) {
+    return ALevelPackDocument(
+      manifest: manifest.copyWith(
+        lastOpenedLevelId: lastOpenedLevelId,
+        clearLastOpenedLevelId: clearLastOpenedLevelId,
+      ),
+      palette: palette,
+      levels: levels,
+    );
   }
 }
 
