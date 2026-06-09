@@ -385,6 +385,27 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> reorderLevels({
+    required int oldIndex,
+    required int newIndex,
+  }) async {
+    final pack =
+        _openedPack ??
+        await _storageService.loadOrCreateDefaultPack(
+          paletteColors: _state.paletteColors,
+        );
+    if (pack.manifest.levels.length < 2) {
+      return;
+    }
+
+    final reorderedPack = pack
+        .reorderLevelByIndex(oldIndex: oldIndex, newIndex: newIndex)
+        .copyWithManifest(lastOpenedLevelId: _lastOpenedLevelId ?? _currentLevelId);
+    _openedPack = reorderedPack;
+    await _persistPackDocument(reorderedPack);
+    notifyListeners();
+  }
+
   bool isLevelChecked(String levelId) => _levelCheckedStates[levelId] ?? false;
 
   void markCurrentLevelChecked(bool checked) {

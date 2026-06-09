@@ -247,6 +247,44 @@ class ALevelPackDocument {
       levels: levels.where((level) => level.id != levelId).toList(),
     );
   }
+
+  ALevelPackDocument reorderLevelByIndex({
+    required int oldIndex,
+    required int newIndex,
+  }) {
+    final manifestLevels = List<ALevelManifestEntry>.from(manifest.levels);
+    if (oldIndex < 0 ||
+        oldIndex >= manifestLevels.length ||
+        newIndex < 0 ||
+        newIndex > manifestLevels.length) {
+      return this;
+    }
+    if (oldIndex == newIndex) {
+      return this;
+    }
+
+    final targetIndex = oldIndex < newIndex ? newIndex - 1 : newIndex;
+    final movedEntry = manifestLevels.removeAt(oldIndex);
+    manifestLevels.insert(targetIndex, movedEntry);
+
+    final levelById = <String, ALevelPackLevel>{
+      for (final level in levels) level.id: level,
+    };
+    final orderedLevels = <ALevelPackLevel>[];
+    for (final entry in manifestLevels) {
+      final level = levelById.remove(entry.id);
+      if (level != null) {
+        orderedLevels.add(level);
+      }
+    }
+    orderedLevels.addAll(levelById.values);
+
+    return ALevelPackDocument(
+      manifest: manifest.copyWith(levels: manifestLevels),
+      palette: palette,
+      levels: orderedLevels,
+    );
+  }
 }
 
 String _colorToRgbHex(Color color) {

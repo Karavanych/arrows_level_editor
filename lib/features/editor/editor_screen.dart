@@ -430,6 +430,33 @@ class _EditorScreenState extends State<EditorScreen> {
     _controller.markCurrentLevelChecked(false);
   }
 
+  Future<void> _handleLevelsReorder(int oldIndex, int newIndex) async {
+    if (_isBusy) {
+      return;
+    }
+    if (oldIndex == newIndex) {
+      return;
+    }
+
+    setState(() {
+      _isBusy = true;
+    });
+    try {
+      await _controller.reorderLevels(oldIndex: oldIndex, newIndex: newIndex);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to reorder levels: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
+    }
+  }
+
   Future<void> _blinkProblemCells(Set<int> cells) async {
     if (cells.isEmpty || !mounted) {
       return;
@@ -898,38 +925,56 @@ class _EditorScreenState extends State<EditorScreen> {
       );
     }
 
-    return ListView.separated(
+    return ReorderableListView.builder(
+      buildDefaultDragHandles: false,
       itemCount: levels.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 6),
+      onReorder: _handleLevelsReorder,
       itemBuilder: (context, index) {
         final level = levels[index];
         final selected = level.id == _controller.currentLevelId;
-        return ListTile(
-          dense: true,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(color: selected ? Colors.indigo : Colors.black12),
-          ),
-          tileColor: selected ? Colors.indigo.withValues(alpha: 0.08) : null,
-          title: Row(
-            children: [
-              if (_controller.isLevelChecked(level.id)) ...[
-                const Icon(
-                  Icons.check_circle,
-                  size: 18,
-                  color: Colors.green,
-                ),
-                const SizedBox(width: 6),
+        return Padding(
+          key: ValueKey(level.id),
+          padding: const EdgeInsets.only(bottom: 6),
+          child: ListTile(
+            dense: true,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: BorderSide(color: selected ? Colors.indigo : Colors.black12),
+            ),
+            tileColor: selected ? Colors.indigo.withValues(alpha: 0.08) : null,
+            title: Row(
+              children: [
+                if (_controller.isLevelChecked(level.id)) ...[
+                  const Icon(
+                    Icons.check_circle,
+                    size: 18,
+                    color: Colors.green,
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                Expanded(child: Text(level.id)),
               ],
-              Expanded(child: Text(level.id)),
-            ],
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Delete level',
+                  onPressed: _isBusy ? null : () => _handleDeleteLevel(level.id),
+                  icon: const Icon(Icons.delete_outline),
+                ),
+                ReorderableDragStartListener(
+                  enabled: !_isBusy,
+                  index: index,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 2),
+                    child: Icon(Icons.drag_indicator),
+                  ),
+                ),
+              ],
+            ),
+            onTap: _isBusy ? null : () => _handleLevelSwitch(level.id),
           ),
-          trailing: IconButton(
-            tooltip: 'Delete level',
-            onPressed: _isBusy ? null : () => _handleDeleteLevel(level.id),
-            icon: const Icon(Icons.delete_outline),
-          ),
-          onTap: _isBusy ? null : () => _handleLevelSwitch(level.id),
         );
       },
     );
