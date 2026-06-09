@@ -15,6 +15,7 @@ class EditorGridView extends StatefulWidget {
     required this.onEraseStrokeEnd,
     required this.onEditorInteractionStart,
     required this.onColorPick,
+    this.isLineModeEnabled = false,
     this.highlightedErrorCells = const {},
   });
 
@@ -27,6 +28,7 @@ class EditorGridView extends StatefulWidget {
   final VoidCallback onEraseStrokeEnd;
   final VoidCallback onEditorInteractionStart;
   final ValueChanged<Color> onColorPick;
+  final bool isLineModeEnabled;
   final Set<int> highlightedErrorCells;
 
   @override
@@ -60,6 +62,8 @@ class _EditorGridViewState extends State<EditorGridView> {
   Offset _gestureStartSceneFocal = Offset.zero;
   double _panZoomStartScale = 1;
   Offset _panZoomStartSceneFocal = Offset.zero;
+  int? _lineStartIndex;
+  int? _lineEndIndex;
 
   @override
   Widget build(BuildContext context) {
@@ -92,6 +96,7 @@ class _EditorGridViewState extends State<EditorGridView> {
                     scale: _scale,
                     offset: _offset,
                     highlightedErrorCells: widget.highlightedErrorCells,
+                    linePreviewIndices: _currentLinePreviewIndices(),
                   ),
                 ),
               ),
@@ -189,6 +194,14 @@ class _EditorGridViewState extends State<EditorGridView> {
         if (index != _primaryLastIndex) {
           _primaryMovedAcrossCells = true;
           _primaryLastIndex = index;
+          if (widget.isLineModeEnabled &&
+              _isPaintingStroke &&
+              _lineStartIndex != null &&
+              index != null) {
+            setState(() {
+              _lineEndIndex = index;
+            });
+          }
         }
       }
       return;
@@ -208,6 +221,13 @@ class _EditorGridViewState extends State<EditorGridView> {
 
     if (event.pointer != _erasePointerId) {
       if (event.pointer == _primaryPointerId) {
+        if (widget.isLineModeEnabled && _isPaintingStroke && _lineStartIndex != null) {
+          final upIndex = _indexFromViewportPosition(event.localPosition);
+          if (upIndex != null) {
+            _lineEndIndex = upIndex;
+          }
+          _applyLineStrokeIfNeeded();
+        }
         final upIndex = _indexFromViewportPosition(event.localPosition);
         final isTrueClick =
             !_primaryMovedAcrossCells &&
@@ -296,7 +316,12 @@ class _EditorGridViewState extends State<EditorGridView> {
     final index = _indexFromViewportPosition(details.localFocalPoint);
     if (index != null) {
       _isPaintingStroke = true;
-      widget.onStrokeStart(index);
+      if (widget.isLineModeEnabled) {
+        _lineStartIndex = index;
+        _lineEndIndex = index;
+      } else {
+        widget.onStrokeStart(index);
+      }
     }
   }
 
@@ -313,7 +338,12 @@ class _EditorGridViewState extends State<EditorGridView> {
         _isPendingColorPick = false;
         _pendingColorPickIndex = null;
         _isPaintingStroke = true;
-        widget.onStrokeStart(index);
+        if (widget.isLineModeEnabled) {
+          _lineStartIndex = index;
+          _lineEndIndex = index;
+        } else {
+          widget.onStrokeStart(index);
+        }
       }
       return;
     }
@@ -340,9 +370,20 @@ class _EditorGridViewState extends State<EditorGridView> {
     if (index != null) {
       if (!_isPaintingStroke) {
         _isPaintingStroke = true;
-        widget.onStrokeStart(index);
+        if (widget.isLineModeEnabled) {
+          _lineStartIndex = index;
+          _lineEndIndex = index;
+        } else {
+          widget.onStrokeStart(index);
+        }
       } else {
-        widget.onCellDrag(index);
+        if (widget.isLineModeEnabled) {
+          setState(() {
+            _lineEndIndex = index;
+          });
+        } else {
+          widget.onCellDrag(index);
+        }
       }
     }
   }
@@ -353,6 +394,9 @@ class _EditorGridViewState extends State<EditorGridView> {
     }
     if (_isPendingColorPick) {
       return;
+    }
+    if (widget.isLineModeEnabled && _isPaintingStroke && _lineStartIndex != null) {
+      _applyLineStrokeIfNeeded();
     }
     _endPaintStrokeIfNeeded();
     _isViewportGesture = false;
@@ -390,8 +434,12 @@ class _EditorGridViewState extends State<EditorGridView> {
       return;
     }
 
-    widget.onStrokeEnd();
+    if (!widget.isLineModeEnabled) {
+      widget.onStrokeEnd();
+    }
     _isPaintingStroke = false;
+    _lineStartIndex = null;
+    _lineEndIndex = null;
   }
 
   void _endEraseStrokeIfNeeded() {
@@ -499,6 +547,79 @@ class _EditorGridViewState extends State<EditorGridView> {
 
     return (row * width) + column;
   }
+
+  void _applyLineStrokeIfNeeded() {
+    final start = _lineStartIndex;
+    final end = _lineEndIndex;
+    if (start == null || end == null) {
+      return;
+    }
+    final segment = _buildAxisAlignedSegment(start, end);
+    if (segment.isEmpty) {
+      _lineStartIndex = null;
+      _lineEndIndex = null;
+      _isPaintingStroke = false;
+      return;
+    }
+
+    widget.onStrokeStart(segment.first);
+    for (var i = 1; i < segment.length; i += 1) {
+      widget.onCellDrag(segment[i]);
+    }
+    widget.onStrokeEnd();
+
+    setState(() {
+      _lineStartIndex = null;
+      _lineEndIndex = null;
+      _isPaintingStroke = false;
+    });
+  }
+
+  List<int> _buildAxisAlignedSegment(int start, int end) {
+    final width = widget.state.gridSize.width;
+    final startX = start % width;
+    final startY = start ~/ width;
+    final endX = end % width;
+    final endY = end ~/ width;
+
+    final dx = endX - startX;
+    final dy = endY - startY;
+    final horizontal = dx.abs() >= dy.abs();
+    final result = <int>[];
+    if (horizontal) {
+      final targetX = endX;
+      final step = targetX >= startX ? 1 : -1;
+      for (var x = startX;; x += step) {
+        result.add(startY * width + x);
+        if (x == targetX) {
+          break;
+        }
+      }
+      return result;
+    }
+
+    final targetY = endY;
+    final step = targetY >= startY ? 1 : -1;
+    for (var y = startY;; y += step) {
+      result.add(y * width + startX);
+      if (y == targetY) {
+        break;
+      }
+    }
+    return result;
+  }
+
+  Set<int> _currentLinePreviewIndices() {
+    if (!widget.isLineModeEnabled) {
+      return const <int>{};
+    }
+    final start = _lineStartIndex;
+    final end = _lineEndIndex;
+    if (!_isPaintingStroke || start == null || end == null) {
+      return const <int>{};
+    }
+    return _buildAxisAlignedSegment(start, end).toSet();
+  }
 }
 
 class _GridPainter extends CustomPainter {
@@ -508,6 +629,7 @@ class _GridPainter extends CustomPainter {
     required this.scale,
     required this.offset,
     required this.highlightedErrorCells,
+    this.linePreviewIndices = const {},
   });
 
   final EditorState state;
@@ -515,6 +637,7 @@ class _GridPainter extends CustomPainter {
   final double scale;
   final Offset offset;
   final Set<int> highlightedErrorCells;
+  final Set<int> linePreviewIndices;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -562,6 +685,9 @@ class _GridPainter extends CustomPainter {
       ..color = Colors.redAccent
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3;
+    final linePreviewPaint = Paint()
+      ..color = Colors.indigo.withValues(alpha: 0.28)
+      ..style = PaintingStyle.fill;
 
     for (var row = firstRow; row < lastRow; row += 1) {
       for (var column = firstColumn; column < lastColumn; column += 1) {
@@ -576,6 +702,9 @@ class _GridPainter extends CustomPainter {
 
         if (cell.paintColor != null) {
           canvas.drawRect(rect, Paint()..color = cell.paintColor!);
+        }
+        if (linePreviewIndices.contains(index)) {
+          canvas.drawRect(rect, linePreviewPaint);
         }
 
         if (cell.isInactive) {
@@ -618,6 +747,7 @@ class _GridPainter extends CustomPainter {
         oldDelegate.cellSize != cellSize ||
         oldDelegate.scale != scale ||
         oldDelegate.offset != offset ||
-        oldDelegate.highlightedErrorCells != highlightedErrorCells;
+        oldDelegate.highlightedErrorCells != highlightedErrorCells ||
+        oldDelegate.linePreviewIndices != linePreviewIndices;
   }
 }

@@ -54,6 +54,8 @@ class EditorStrokeChange {
 
 enum EditorTool { paint, inactive, startMarker, erase }
 
+enum BrushApplicationMode { point, line }
+
 class EditorState {
   const EditorState({
     required this.gridSize,

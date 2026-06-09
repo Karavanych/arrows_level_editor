@@ -876,6 +876,8 @@ class _EditorScreenState extends State<EditorScreen> {
                           ),
                           const SizedBox(height: 8),
                           _buildToolSelector(state),
+                          const SizedBox(height: 12),
+                          _buildBrushModeSelector(),
                           const SizedBox(height: 20),
                           Text(
                             'Color Palette',
@@ -898,6 +900,8 @@ class _EditorScreenState extends State<EditorScreen> {
                             onStrokeStart: _controller.beginStroke,
                             onCellDrag: _controller.touchCell,
                             onStrokeEnd: _controller.endStroke,
+                            isLineModeEnabled:
+                                _controller.isLineBrushModeEnabledForCurrentTool,
                             onEraseStrokeStart: _controller.beginEraseStroke,
                             onEraseCellDrag: _controller.eraseCell,
                             onEraseStrokeEnd: _controller.endEraseStroke,
@@ -979,6 +983,42 @@ class _EditorScreenState extends State<EditorScreen> {
         OutlinedButton(
           onPressed: _isBusy ? null : _handleEraseAll,
           child: const Text('Erase All'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBrushModeSelector() {
+    final selectedMode = _controller.brushApplicationMode;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Apply Mode',
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
+        const SizedBox(height: 6),
+        SegmentedButton<BrushApplicationMode>(
+          segments: const [
+            ButtonSegment<BrushApplicationMode>(
+              value: BrushApplicationMode.point,
+              icon: Icon(Icons.grid_on, size: 16),
+              label: Text('Point'),
+            ),
+            ButtonSegment<BrushApplicationMode>(
+              value: BrushApplicationMode.line,
+              icon: Icon(Icons.horizontal_rule, size: 18),
+              label: Text('Line'),
+            ),
+          ],
+          selected: {selectedMode},
+          onSelectionChanged: (selection) {
+            final next = selection.firstOrNull;
+            if (next == null) {
+              return;
+            }
+            _controller.setBrushApplicationMode(next);
+          },
         ),
       ],
     );

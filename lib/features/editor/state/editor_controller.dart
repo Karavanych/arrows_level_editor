@@ -51,6 +51,7 @@ class EditorController extends ChangeNotifier {
   final Map<String, bool> _levelDirtyStates = {};
   final Map<String, bool> _levelCheckedStates = {};
   final _EditorLifecycleObserver _lifecycleObserver = _EditorLifecycleObserver();
+  BrushApplicationMode _brushApplicationMode = BrushApplicationMode.point;
 
   EditorState get state => _state;
   String get currentLevelId => _currentLevelId;
@@ -68,6 +69,10 @@ class EditorController extends ChangeNotifier {
             !cell.isInactive &&
             !cell.hasStartMarker,
       );
+  BrushApplicationMode get brushApplicationMode => _brushApplicationMode;
+  bool get isLineBrushModeEnabledForCurrentTool =>
+      _brushApplicationMode == BrushApplicationMode.line &&
+      _state.selectedTool != EditorTool.startMarker;
 
   Future<void> createLevel({
     required int width,
@@ -492,6 +497,14 @@ class EditorController extends ChangeNotifier {
 
   void selectTool(EditorTool tool) {
     _state = _state.copyWith(selectedTool: tool);
+    notifyListeners();
+  }
+
+  void setBrushApplicationMode(BrushApplicationMode mode) {
+    if (_brushApplicationMode == mode) {
+      return;
+    }
+    _brushApplicationMode = mode;
     notifyListeners();
   }
 
