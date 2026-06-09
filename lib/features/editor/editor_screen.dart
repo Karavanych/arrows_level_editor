@@ -3,6 +3,7 @@ import 'package:arrows_level_editor/features/editor/state/editor_controller.dart
 import 'package:arrows_level_editor/features/editor/validation/editor_check_preview_simulation.dart';
 import 'package:arrows_level_editor/features/editor/validation/editor_save_validation.dart';
 import 'package:arrows_level_editor/features/editor/widgets/editor_grid_view.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -624,6 +625,98 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
+  Future<void> _handleEditPaletteColor({
+    required int index,
+    required Color initialColor,
+  }) async {
+    if (_isBusy) {
+      return;
+    }
+
+    var candidateColor = initialColor;
+    final reservedInactiveColor = _controller.inactiveReservedColor;
+    final reservedArgb = reservedInactiveColor.toARGB32();
+    String? validationMessage;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final selectedArgb = candidateColor.toARGB32();
+            final isReserved = selectedArgb == reservedArgb;
+            validationMessage = isReserved
+                ? 'This color is reserved for inactive cells and cannot be used in palette slots.'
+                : null;
+            return AlertDialog(
+              title: const Text('Edit palette color'),
+              content: SizedBox(
+                width: 360,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ColorPicker(
+                      pickerColor: candidateColor,
+                      onColorChanged: (next) {
+                        setDialogState(() {
+                          candidateColor = next;
+                        });
+                      },
+                      enableAlpha: false,
+                      displayThumbColor: true,
+                      portraitOnly: true,
+                    ),
+                    if (validationMessage != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        validationMessage!,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: isReserved
+                      ? null
+                      : () => Navigator.of(dialogContext).pop(true),
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() {
+      _isBusy = true;
+    });
+    try {
+      await _controller.updatePaletteColorAt(index: index, color: candidateColor);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to update palette color: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
+    }
+  }
+
   Future<void> _blinkProblemCells(Set<int> cells) async {
     if (cells.isEmpty || !mounted) {
       return;
@@ -1039,6 +1132,8 @@ class _EditorScreenState extends State<EditorScreen> {
         final selected = state.selectedColor.toARGB32() == color.toARGB32();
         return InkWell(
           onTap: () => _controller.selectColorAndActivatePaint(color),
+          onDoubleTap: () =>
+              _handleEditPaletteColor(index: index, initialColor: color),
           borderRadius: BorderRadius.circular(8),
           child: DecoratedBox(
             decoration: BoxDecoration(

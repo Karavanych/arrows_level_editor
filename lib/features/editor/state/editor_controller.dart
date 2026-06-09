@@ -4,6 +4,7 @@ import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
 import 'package:arrows_level_editor/features/editor/persistence/alevelpack_storage_service.dart';
 import 'package:arrows_level_editor/features/editor/persistence/editor_level_mapper.dart';
 import 'package:arrows_level_editor/features/editor/persistence/level_id_generator.dart';
+import 'package:arrows_level_editor/features/editor/persistence/palette_settings_service.dart';
 import 'package:arrows_level_editor/features/editor/persistence/model/alevelpack_models.dart';
 import 'package:arrows_level_editor/features/editor/validation/editor_save_validation.dart';
 import 'package:flutter/material.dart';
@@ -15,12 +16,15 @@ class EditorController extends ChangeNotifier {
     EditorLevelMapper? levelMapper,
     EditorSaveValidationService? saveValidationService,
     EditorLevelIdGenerator? levelIdGenerator,
+    PaletteSettingsService? paletteSettingsService,
   }) : _state = EditorState.initial(),
        _storageService = storageService ?? ALevelPackStorageService(),
        _levelMapper = levelMapper ?? const EditorLevelMapper(),
        _saveValidationService =
            saveValidationService ?? EditorSaveValidationService(),
        _levelIdGenerator = levelIdGenerator ?? EditorLevelIdGenerator(),
+       _paletteSettingsService =
+           paletteSettingsService ?? PaletteSettingsService(),
        _currentLevelId = (levelIdGenerator ?? EditorLevelIdGenerator())
            .generate() {
     WidgetsBinding.instance.addObserver(_lifecycleObserver);
@@ -36,6 +40,7 @@ class EditorController extends ChangeNotifier {
   final EditorLevelMapper _levelMapper;
   final EditorSaveValidationService _saveValidationService;
   final EditorLevelIdGenerator _levelIdGenerator;
+  final PaletteSettingsService _paletteSettingsService;
   final Set<int> _strokeTouchedCells = {};
   final Set<int> _eraseStrokeTouchedCells = {};
   final List<EditorStrokeChange> _undoHistory = [];
@@ -73,6 +78,7 @@ class EditorController extends ChangeNotifier {
   bool get isLineBrushModeEnabledForCurrentTool =>
       _brushApplicationMode == BrushApplicationMode.line &&
       _state.selectedTool != EditorTool.startMarker;
+  Color get inactiveReservedColor => EditorLevelMapper.inactiveColor;
 
   Future<void> createLevel({
     required int width,
@@ -227,6 +233,7 @@ class EditorController extends ChangeNotifier {
   }
 
   Future<void> loadLevelFromDefaultPack({String? levelId}) async {
+    await _restoreCustomPaletteFromSettingsIfNeeded();
     final pack = await _storageService.loadOrCreateDefaultPack(
       paletteColors: _state.paletteColors,
     );
@@ -505,6 +512,31 @@ class EditorController extends ChangeNotifier {
       return;
     }
     _brushApplicationMode = mode;
+    notifyListeners();
+  }
+
+  Future<void> updatePaletteColorAt({
+    required int index,
+    required Color color,
+  }) async {
+    if (index < 0 || index >= _state.paletteColors.length) {
+      return;
+    }
+    final previousSlotColor = _state.paletteColors[index];
+    final nextPalette = List<Color>.from(_state.paletteColors);
+    nextPalette[index] = color;
+    _state = _state.copyWith(paletteColors: nextPalette);
+    if (_state.selectedColor.toARGB32() == previousSlotColor.toARGB32()) {
+      _state = _state.copyWith(selectedColor: color);
+    }
+
+    for (final entry in _levelDraftStates.entries.toList()) {
+      final draft = entry.value;
+      _levelDraftStates[entry.key] = draft.copyWith(
+        paletteColors: List<Color>.from(nextPalette),
+      );
+    }
+    await _paletteSettingsService.savePaletteColors(nextPalette);
     notifyListeners();
   }
 
@@ -877,6 +909,22 @@ class EditorController extends ChangeNotifier {
   Future<void> _persistPackDocument(ALevelPackDocument pack) async {
     final file = await _storageService.getDefaultPackFile();
     await _storageService.savePack(file: file, pack: pack);
+  }
+
+  Future<void> _restoreCustomPaletteFromSettingsIfNeeded() async {
+    final restored = await _paletteSettingsService.loadPaletteColors(
+      expectedLength: _state.paletteColors.length,
+    );
+    if (restored == null) {
+      return;
+    }
+    _state = _state.copyWith(
+      paletteColors: restored,
+      selectedColor: restored.firstWhere(
+        (it) => it.toARGB32() == _state.selectedColor.toARGB32(),
+        orElse: () => restored.first,
+      ),
+    );
   }
 
   @override
