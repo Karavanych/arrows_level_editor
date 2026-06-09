@@ -630,16 +630,15 @@ class EditorController extends ChangeNotifier {
     }
 
     final current = _state.cells[index];
+    final nextCells = List<EditorCell>.from(_state.cells);
     final isEmptyForPaintOrInactive =
         current.paintColor == null && !current.isInactive;
-    late final EditorCell updated;
-
     switch (_state.selectedTool) {
       case EditorTool.paint:
         if (!isEmptyForPaintOrInactive) {
           return;
         }
-        updated = current.copyWith(
+        nextCells[index] = current.copyWith(
           paintColor: _state.selectedColor,
           isInactive: false,
         );
@@ -647,19 +646,93 @@ class EditorController extends ChangeNotifier {
         if (!isEmptyForPaintOrInactive) {
           return;
         }
-        updated = const EditorCell(isInactive: true);
+        nextCells[index] = const EditorCell(isInactive: true);
       case EditorTool.startMarker:
-        updated = current.copyWith(hasStartMarker: true);
+        final targetColorArgb = current.paintColor?.toARGB32();
+        if (!current.isInactive && targetColorArgb != null) {
+          final componentIndices = _collectSameColorComponentIndices(
+            startIndex: index,
+            colorArgb: targetColorArgb,
+            cells: nextCells,
+          );
+          for (final componentIndex in componentIndices) {
+            if (componentIndex == index) {
+              continue;
+            }
+            final componentCell = nextCells[componentIndex];
+            if (!componentCell.hasStartMarker) {
+              continue;
+            }
+            nextCells[componentIndex] = componentCell.copyWith(
+              hasStartMarker: false,
+            );
+            _recordCellChange(componentIndex, _state.cells[componentIndex]);
+          }
+        }
+        nextCells[index] = nextCells[index].copyWith(hasStartMarker: true);
       case EditorTool.erase:
-        updated = const EditorCell();
+        nextCells[index] = const EditorCell();
     }
-
-    final nextCells = List<EditorCell>.from(_state.cells);
-    nextCells[index] = updated;
+    if (_cellsEqual(_state.cells[index], nextCells[index])) {
+      final hasOtherChanges = nextCells.asMap().entries.any(
+        (entry) => !_cellsEqual(_state.cells[entry.key], entry.value),
+      );
+      if (!hasOtherChanges) {
+        return;
+      }
+    }
     _state = _state.copyWith(cells: nextCells, selectedCellIndex: index);
     _recordCellChange(index, current);
     _markCurrentLevelEdited();
     notifyListeners();
+  }
+
+  Set<int> _collectSameColorComponentIndices({
+    required int startIndex,
+    required int colorArgb,
+    required List<EditorCell> cells,
+  }) {
+    final visited = <int>{startIndex};
+    final queue = <int>[startIndex];
+    var cursor = 0;
+
+    while (cursor < queue.length) {
+      final current = queue[cursor];
+      cursor += 1;
+      for (final neighbor in _neighbors4(current)) {
+        if (visited.contains(neighbor)) {
+          continue;
+        }
+        final neighborCell = cells[neighbor];
+        final neighborColor = neighborCell.paintColor?.toARGB32();
+        if (neighborCell.isInactive || neighborColor != colorArgb) {
+          continue;
+        }
+        visited.add(neighbor);
+        queue.add(neighbor);
+      }
+    }
+
+    return visited;
+  }
+
+  Iterable<int> _neighbors4(int index) sync* {
+    final width = _state.gridSize.width;
+    final height = _state.gridSize.height;
+    final x = index % width;
+    final y = index ~/ width;
+    if (x > 0) {
+      yield index - 1;
+    }
+    if (x < width - 1) {
+      yield index + 1;
+    }
+    if (y > 0) {
+      yield index - width;
+    }
+    if (y < height - 1) {
+      yield index + width;
+    }
   }
 
   void _beginHistoryStroke() {
