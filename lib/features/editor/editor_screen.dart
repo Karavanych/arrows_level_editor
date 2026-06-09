@@ -25,6 +25,9 @@ class _EditorScreenState extends State<EditorScreen> {
   final Set<int> _highlightedErrorCells = <int>{};
   bool _isBlinkOn = false;
   bool _isBusy = false;
+  String? _lastSyncedLevelId;
+  int? _lastSyncedLevelWidth;
+  int? _lastSyncedLevelHeight;
 
   @override
   void initState() {
@@ -409,6 +412,24 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
+  Future<void> _handleEraseAll() async {
+    if (_isBusy) {
+      return;
+    }
+
+    final shouldClear = await _askYesCancel(
+      title: 'Clear level?',
+      message:
+          'Are you sure you want to clear the entire level? You will lose everything you have drawn.',
+    );
+    if (shouldClear != true) {
+      return;
+    }
+
+    _controller.clearCurrentLevelContents();
+    _controller.markCurrentLevelChecked(false);
+  }
+
   Future<void> _blinkProblemCells(Set<int> cells) async {
     if (cells.isEmpty || !mounted) {
       return;
@@ -583,6 +604,39 @@ class _EditorScreenState extends State<EditorScreen> {
     return KeyEventResult.ignored;
   }
 
+  void _syncDimensionInputsWithCurrentLevel(EditorState state) {
+    final currentLevelId = _controller.currentLevelId;
+    final currentWidth = state.gridSize.width;
+    final currentHeight = state.gridSize.height;
+    final needsSync =
+        _lastSyncedLevelId != currentLevelId ||
+        _lastSyncedLevelWidth != currentWidth ||
+        _lastSyncedLevelHeight != currentHeight;
+    if (!needsSync) {
+      return;
+    }
+
+    final nextWidthText = currentWidth.toString();
+    if (_widthController.text != nextWidthText) {
+      _widthController.value = TextEditingValue(
+        text: nextWidthText,
+        selection: TextSelection.collapsed(offset: nextWidthText.length),
+      );
+    }
+
+    final nextHeightText = currentHeight.toString();
+    if (_heightController.text != nextHeightText) {
+      _heightController.value = TextEditingValue(
+        text: nextHeightText,
+        selection: TextSelection.collapsed(offset: nextHeightText.length),
+      );
+    }
+
+    _lastSyncedLevelId = currentLevelId;
+    _lastSyncedLevelWidth = currentWidth;
+    _lastSyncedLevelHeight = currentHeight;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -595,6 +649,7 @@ class _EditorScreenState extends State<EditorScreen> {
             animation: _controller,
             builder: (context, _) {
               final state = _controller.state;
+              _syncDimensionInputsWithCurrentLevel(state);
               return Row(
                 children: [
                   Container(
@@ -714,16 +769,24 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Widget _buildToolSelector(EditorState state) {
+    final toolChips = EditorTool.values.map((tool) {
+      return ChoiceChip(
+        label: Text(_toolLabel(tool)),
+        selected: state.selectedTool == tool,
+        onSelected: (_) => _controller.selectTool(tool),
+      );
+    }).toList();
+
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: EditorTool.values.map((tool) {
-        return ChoiceChip(
-          label: Text(_toolLabel(tool)),
-          selected: state.selectedTool == tool,
-          onSelected: (_) => _controller.selectTool(tool),
-        );
-      }).toList(),
+      children: [
+        ...toolChips,
+        OutlinedButton(
+          onPressed: _isBusy ? null : _handleEraseAll,
+          child: const Text('Erase All'),
+        ),
+      ],
     );
   }
 

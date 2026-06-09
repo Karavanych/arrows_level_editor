@@ -392,6 +392,42 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void clearCurrentLevelContents() {
+    final width = _state.gridSize.width;
+    final nextCells = List<EditorCell>.from(_state.cells);
+    final changes = <CellChange>[];
+
+    for (var index = 0; index < nextCells.length; index += 1) {
+      final current = nextCells[index];
+      if (current.paintColor == null &&
+          !current.isInactive &&
+          !current.hasStartMarker) {
+        continue;
+      }
+
+      nextCells[index] = const EditorCell();
+      changes.add(
+        CellChange(
+          x: index % width,
+          y: index ~/ width,
+          beforeCell: current,
+          afterCell: const EditorCell(),
+        ),
+      );
+    }
+
+    if (changes.isEmpty) {
+      return;
+    }
+
+    _state = _state.copyWith(cells: nextCells, clearSelectedCell: true);
+    _undoHistory.add(EditorStrokeChange(changes: changes));
+    _trimHistory(_undoHistory);
+    _redoHistory.clear();
+    _markCurrentLevelEdited();
+    notifyListeners();
+  }
+
   void selectTool(EditorTool tool) {
     _state = _state.copyWith(selectedTool: tool);
     notifyListeners();
