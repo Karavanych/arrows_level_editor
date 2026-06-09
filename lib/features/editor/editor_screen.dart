@@ -1,8 +1,12 @@
+import 'dart:io';
+
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
 import 'package:arrows_level_editor/features/editor/state/editor_controller.dart';
 import 'package:arrows_level_editor/features/editor/validation/editor_check_preview_simulation.dart';
 import 'package:arrows_level_editor/features/editor/validation/editor_save_validation.dart';
 import 'package:arrows_level_editor/features/editor/widgets/editor_grid_view.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -27,6 +31,8 @@ class _EditorScreenState extends State<EditorScreen> {
   final Set<int> _highlightedErrorCells = <int>{};
   bool _isBlinkOn = false;
   bool _isBusy = false;
+  bool _isDraggingReferenceImages = false;
+  final List<String> _referenceImagePaths = <String>[];
   String? _lastSyncedLevelId;
   int? _lastSyncedLevelWidth;
   int? _lastSyncedLevelHeight;
@@ -625,6 +631,69 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
+  Future<void> _handleReferenceImagesDrop(List<dynamic> files) async {
+    final droppedPaths = files
+        .map((file) => file.path as String?)
+        .whereType<String>()
+        .where((path) => path.isNotEmpty && _isImagePath(path))
+        .toList(growable: false);
+    await _addReferenceImagePaths(droppedPaths);
+  }
+
+  Future<void> _pickReferenceImages() async {
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.pickFiles(
+        allowMultiple: true,
+        type: FileType.custom,
+        allowedExtensions: const ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'],
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to pick images: $error');
+      return;
+    }
+
+    final paths = result?.files
+            .map((file) => file.path)
+            .whereType<String>()
+            .where((path) => path.isNotEmpty && _isImagePath(path))
+            .toList(growable: false) ??
+        const <String>[];
+    await _addReferenceImagePaths(paths);
+  }
+
+  Future<void> _addReferenceImagePaths(List<String> paths) async {
+    if (paths.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('No supported image files were selected.');
+      return;
+    }
+
+    setState(() {
+      for (final path in paths) {
+        if (_referenceImagePaths.contains(path)) {
+          continue;
+        }
+        _referenceImagePaths.add(path);
+      }
+    });
+  }
+
+  bool _isImagePath(String path) {
+    final lower = path.toLowerCase();
+    return lower.endsWith('.png') ||
+        lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg') ||
+        lower.endsWith('.webp') ||
+        lower.endsWith('.gif') ||
+        lower.endsWith('.bmp');
+  }
+
   Future<void> _handleEditPaletteColor({
     required int index,
     required Color initialColor,
@@ -938,6 +1007,7 @@ class _EditorScreenState extends State<EditorScreen> {
               final state = _controller.state;
               _syncDimensionInputsWithCurrentLevel(state);
               return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
                     width: 280,
@@ -978,6 +1048,8 @@ class _EditorScreenState extends State<EditorScreen> {
                           ),
                           const SizedBox(height: 8),
                           _buildColorPalette(state),
+                          const SizedBox(height: 20),
+                          _buildReferenceImagesSection(),
                         ],
                       ),
                     ),
@@ -1147,6 +1219,163 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildReferenceImagesSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Reference Images',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _isBusy ? null : _pickReferenceImages,
+                child: const Text(
+                  'Add Images...',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: _referenceImagePaths.isEmpty
+                  ? null
+                  : () {
+                      setState(() {
+                        _referenceImagePaths.clear();
+                      });
+                    },
+              child: const Text('Clear all'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Selected: ${_referenceImagePaths.length}',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        DropTarget(
+          onDragEntered: (_) {
+            setState(() {
+              _isDraggingReferenceImages = true;
+            });
+          },
+          onDragExited: (_) {
+            setState(() {
+              _isDraggingReferenceImages = false;
+            });
+          },
+          onDragDone: (details) async {
+            setState(() {
+              _isDraggingReferenceImages = false;
+            });
+            await _handleReferenceImagesDrop(details.files);
+          },
+          child: Container(
+            height: 110,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: _isDraggingReferenceImages
+                  ? Colors.blue.withValues(alpha: 0.08)
+                  : Colors.grey.shade100,
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            alignment: Alignment.center,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: const [
+                Icon(
+                  Icons.file_upload_outlined,
+                  size: 28,
+                  color: Colors.grey,
+                ),
+                SizedBox(height: 6),
+                Text('Drag & drop images here'),
+              ],
+            ),
+          ),
+        ),
+        if (_referenceImagePaths.isNotEmpty) const SizedBox(height: 10),
+        if (_referenceImagePaths.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _referenceImagePaths.map((path) {
+              final fileName = path.split(Platform.pathSeparator).last;
+              return Container(
+                width: 80,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(10),
+                  color: Colors.white,
+                ),
+                padding: const EdgeInsets.all(6),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        SizedBox(
+                          width: 64,
+                          height: 64,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.file(
+                              File(path),
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Container(
+                                color: Colors.grey.shade200,
+                                alignment: Alignment.center,
+                                child: const Icon(Icons.broken_image_outlined),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          top: -8,
+                          right: -10,
+                          child: IconButton(
+                            style: IconButton.styleFrom(
+                              backgroundColor: Colors.black54,
+                              minimumSize: const Size(22, 22),
+                              padding: EdgeInsets.zero,
+                            ),
+                            icon: const Icon(
+                              Icons.close,
+                              size: 13,
+                              color: Colors.white,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _referenceImagePaths.remove(path);
+                              });
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      fileName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              );
+            }).toList(growable: false),
+          ),
+      ],
     );
   }
 
