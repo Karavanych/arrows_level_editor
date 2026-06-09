@@ -33,7 +33,7 @@ class EditorCheckPreviewSimulationService {
     required EditorState baseState,
     required CheckPreviewStepCallback onStep,
     required CheckPreviewBlockedCallback onBlocked,
-    Duration stepDelay = const Duration(seconds: 1),
+    Duration stepDelay = const Duration(milliseconds: 250),
   }) async {
     final working = _WorkingCopy(baseState);
     var usedOppositeStarts = false;
@@ -79,7 +79,9 @@ class EditorCheckPreviewSimulationService {
         working.removeComponent(component);
         removedAny = true;
         await onStep(working.toState(baseState), 'running');
-        await Future<void>.delayed(stepDelay);
+        if (stepDelay > Duration.zero) {
+          await Future<void>.delayed(stepDelay);
+        }
       }
 
       if (removedAny) {
