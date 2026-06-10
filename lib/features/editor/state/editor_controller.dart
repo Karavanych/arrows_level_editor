@@ -418,6 +418,42 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<int> addGeneratedLevels(List<EditorState> generatedStates) async {
+    if (generatedStates.isEmpty) {
+      return 0;
+    }
+
+    var pack =
+        _openedPack ??
+        await _storageService.loadOrCreateDefaultPack(
+          paletteColors: _state.paletteColors,
+        );
+    for (final generatedState in generatedStates) {
+      final levelId = _levelIdGenerator.generate();
+      final level = _levelMapper.toPersistedLevel(
+        levelId: levelId,
+        state: generatedState,
+        checked: false,
+      );
+      pack = _storageService.buildPackWithUpsertedLevel(
+        source: pack,
+        level: level,
+        lastOpenedLevelId: _lastOpenedLevelId ?? _currentLevelId,
+      );
+      _levelCheckedStates[levelId] = false;
+      _levelDirtyStates[levelId] = false;
+      _levelDraftStates[levelId] = generatedState.copyWith(
+        cells: List<EditorCell>.from(generatedState.cells),
+        paletteColors: List<Color>.from(generatedState.paletteColors),
+      );
+    }
+
+    _openedPack = pack;
+    await _persistPackDocument(pack);
+    notifyListeners();
+    return generatedStates.length;
+  }
+
   bool isLevelChecked(String levelId) => _levelCheckedStates[levelId] ?? false;
 
   EditorGridSize? levelGridSizeById(String levelId) {

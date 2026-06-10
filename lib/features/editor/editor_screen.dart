@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
+import 'package:arrows_level_editor/features/editor/reference_image_level_generator.dart';
 import 'package:arrows_level_editor/features/editor/state/editor_controller.dart';
 import 'package:arrows_level_editor/features/editor/validation/editor_check_preview_simulation.dart';
 import 'package:arrows_level_editor/features/editor/validation/editor_save_validation.dart';
@@ -38,6 +39,8 @@ class _EditorScreenState extends State<EditorScreen> {
   int? _lastSyncedLevelHeight;
   final EditorCheckPreviewSimulationService _checkPreviewSimulationService =
       EditorCheckPreviewSimulationService();
+  final ReferenceImageLevelGenerator _referenceImageLevelGenerator =
+      const ReferenceImageLevelGenerator();
 
   @override
   void initState() {
@@ -684,6 +687,61 @@ class _EditorScreenState extends State<EditorScreen> {
     });
   }
 
+  Future<void> _handleGenerateLevelsFromReferences() async {
+    if (_isBusy) {
+      return;
+    }
+    if (_referenceImagePaths.isEmpty) {
+      _showErrorSnackBar('Add at least one reference image first.');
+      return;
+    }
+    final width = int.tryParse(_widthController.text);
+    final height = int.tryParse(_heightController.text);
+    if (width == null || height == null || width <= 0 || height <= 0) {
+      _showErrorSnackBar('Enter a valid grid width and height first.');
+      return;
+    }
+
+    setState(() {
+      _isBusy = true;
+    });
+    try {
+      final state = _controller.state;
+      final generatedStates = await _referenceImageLevelGenerator
+          .generateLevelsFromReferenceImages(
+            imagePaths: List<String>.from(_referenceImagePaths),
+            gridWidth: width,
+            gridHeight: height,
+            paletteColors: state.paletteColors,
+            selectedColor: state.selectedColor,
+            selectedTool: state.selectedTool,
+          );
+      final generatedCount = await _controller.addGeneratedLevels(
+        generatedStates,
+      );
+      if (!mounted) {
+        return;
+      }
+      final message = generatedCount == 1
+          ? 'Generated 1 level.'
+          : 'Generated $generatedCount levels.';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to start generation: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+        });
+      }
+    }
+  }
+
   bool _isImagePath(String path) {
     final lower = path.toLowerCase();
     return lower.endsWith('.png') ||
@@ -1229,6 +1287,14 @@ class _EditorScreenState extends State<EditorScreen> {
         Text(
           'Reference Images',
           style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: _isBusy ? null : _handleGenerateLevelsFromReferences,
+            child: const Text('GENERATE LEVELS'),
+          ),
         ),
         const SizedBox(height: 8),
         Row(
