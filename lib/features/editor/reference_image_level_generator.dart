@@ -79,8 +79,23 @@ class ReferenceImageLevelGenerator {
     }
 
     for (final region in regions) {
-      _fillRemainingActiveRegionCells(region: region, outputCells: outputCells);
+      _fillRemainingActiveRegionCells(
+        region: region,
+        outputCells: outputCells,
+        gridWidth: gridWidth,
+        gridHeight: gridHeight,
+      );
     }
+    _repairSameColorNeighborViolations(
+      cells: outputCells,
+      gridWidth: gridWidth,
+      gridHeight: gridHeight,
+    );
+    _enforceSimplePathComponents(
+      cells: outputCells,
+      gridWidth: gridWidth,
+      gridHeight: gridHeight,
+    );
 
     return outputCells;
   }
@@ -269,7 +284,12 @@ class ReferenceImageLevelGenerator {
       );
     }
 
-    _fillRemainingActiveRegionCells(region: region, outputCells: outputCells);
+    _fillRemainingActiveRegionCells(
+      region: region,
+      outputCells: outputCells,
+      gridWidth: gridWidth,
+      gridHeight: gridHeight,
+    );
   }
 
   List<int> _chooseSeeds({
@@ -347,6 +367,15 @@ class ReferenceImageLevelGenerator {
               gridHeight: gridHeight,
             ) >
             1) {
+          continue;
+        }
+        if (_wouldViolateSameColorNeighborRule(
+          candidate: neighbor,
+          color: line.color,
+          outputCells: outputCells,
+          gridWidth: gridWidth,
+          gridHeight: gridHeight,
+        )) {
           continue;
         }
         candidates.add(
@@ -453,6 +482,15 @@ class ReferenceImageLevelGenerator {
         if (next == null || next.score < -config.blobPenalty) {
           continue;
         }
+        if (_wouldViolateSameColorNeighborRule(
+          candidate: next.index,
+          color: line.color,
+          outputCells: outputCells,
+          gridWidth: gridWidth,
+          gridHeight: gridHeight,
+        )) {
+          continue;
+        }
         if (next.growAtHead) {
           line.indices.add(next.index);
         } else {
@@ -500,13 +538,501 @@ class ReferenceImageLevelGenerator {
   void _fillRemainingActiveRegionCells({
     required _ColorRegion region,
     required List<EditorCell> outputCells,
+    required int gridWidth,
+    required int gridHeight,
   }) {
+    final variantCount = math.max(
+      1,
+      math.min(config.maxLinesPerRegion, region.indices.length),
+    );
+    final variants = List<Color>.generate(
+      variantCount,
+      (index) => _variantColor(
+        baseColor: region.baseColor,
+        variantIndex: index,
+        variantCount: variantCount,
+      ),
+    );
     for (final index in region.indices) {
       if (!_isInactive(outputCells[index])) {
         continue;
       }
-      outputCells[index] = EditorCell(paintColor: region.baseColor);
+      final color = _bestNonViolatingFillColor(
+        index: index,
+        variants: variants,
+        outputCells: outputCells,
+        gridWidth: gridWidth,
+        gridHeight: gridHeight,
+      );
+      outputCells[index] = EditorCell(paintColor: color);
     }
+  }
+
+  bool _wouldViolateSameColorNeighborRule({
+    required int candidate,
+    required Color color,
+    required List<EditorCell> outputCells,
+    required int gridWidth,
+    required int gridHeight,
+  }) {
+    if (_sameColorNeighborCount(
+          candidate,
+          outputCells,
+          gridWidth: gridWidth,
+          gridHeight: gridHeight,
+          overrideIndex: candidate,
+          overrideColor: color,
+        ) >
+        2) {
+      return true;
+    }
+
+    for (final neighbor in _neighbors4(
+      candidate,
+      gridWidth: gridWidth,
+      gridHeight: gridHeight,
+    )) {
+      final neighborColor = outputCells[neighbor].paintColor;
+      if (neighborColor == null ||
+          neighborColor.toARGB32() != color.toARGB32()) {
+        continue;
+      }
+      if (_sameColorNeighborCount(
+            neighbor,
+            outputCells,
+            gridWidth: gridWidth,
+            gridHeight: gridHeight,
+            overrideIndex: candidate,
+            overrideColor: color,
+          ) >
+          2) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Color _bestNonViolatingFillColor({
+    required int index,
+    required List<Color> variants,
+    required List<EditorCell> outputCells,
+    required int gridWidth,
+    required int gridHeight,
+  }) {
+    final neighborPreferred = _neighbors4(
+      index,
+      gridWidth: gridWidth,
+      gridHeight: gridHeight,
+    )
+        .map((it) => outputCells[it].paintColor)
+        .whereType<Color>()
+        .toList(growable: false);
+    for (final color in neighborPreferred) {
+      if (!_wouldViolateSameColorNeighborRule(
+        candidate: index,
+        color: color,
+        outputCells: outputCells,
+        gridWidth: gridWidth,
+        gridHeight: gridHeight,
+      )) {
+        return color;
+      }
+    }
+
+    for (final color in variants) {
+      if (!_wouldViolateSameColorNeighborRule(
+        candidate: index,
+        color: color,
+        outputCells: outputCells,
+        gridWidth: gridWidth,
+        gridHeight: gridHeight,
+      )) {
+        return color;
+      }
+    }
+
+    final baseColor = variants.isEmpty ? Colors.black : variants.first;
+    final repairColors = _repairColorVariants(baseColor);
+    for (final color in repairColors) {
+      if (!_wouldViolateSameColorNeighborRule(
+        candidate: index,
+        color: color,
+        outputCells: outputCells,
+        gridWidth: gridWidth,
+        gridHeight: gridHeight,
+      )) {
+        return color;
+      }
+    }
+    return _nearestColorNotUsedByNeighbors(
+      index: index,
+      baseColor: baseColor,
+      outputCells: outputCells,
+      gridWidth: gridWidth,
+      gridHeight: gridHeight,
+    );
+  }
+
+  void _repairSameColorNeighborViolations({
+    required List<EditorCell> cells,
+    required int gridWidth,
+    required int gridHeight,
+  }) {
+    var changed = true;
+    var pass = 0;
+    while (changed && pass < math.max(1, config.cleanupPasses + 2)) {
+      changed = false;
+      pass += 1;
+      for (var index = 0; index < cells.length; index += 1) {
+        final color = cells[index].paintColor;
+        if (color == null || cells[index].isInactive) {
+          continue;
+        }
+        final sameColorNeighbors = _sameColorNeighborCount(
+          index,
+          cells,
+          gridWidth: gridWidth,
+          gridHeight: gridHeight,
+        );
+        if (sameColorNeighbors < 3) {
+          continue;
+        }
+
+        var repairedThisCell = false;
+        for (final repairColor in _repairColorVariants(color)) {
+          if (repairColor.toARGB32() == color.toARGB32()) {
+            continue;
+          }
+          if (!_wouldViolateSameColorNeighborRule(
+            candidate: index,
+            color: repairColor,
+            outputCells: cells,
+            gridWidth: gridWidth,
+            gridHeight: gridHeight,
+          )) {
+            cells[index] = EditorCell(paintColor: repairColor);
+            changed = true;
+            repairedThisCell = true;
+            break;
+          }
+        }
+        if (!repairedThisCell &&
+            _sameColorNeighborCount(
+                  index,
+                  cells,
+                  gridWidth: gridWidth,
+                  gridHeight: gridHeight,
+                ) >
+                2) {
+          cells[index] = EditorCell(
+            paintColor: _nearestColorNotUsedByNeighbors(
+              index: index,
+              baseColor: color,
+              outputCells: cells,
+              gridWidth: gridWidth,
+              gridHeight: gridHeight,
+            ),
+          );
+          changed = true;
+        }
+      }
+    }
+  }
+
+  void _enforceSimplePathComponents({
+    required List<EditorCell> cells,
+    required int gridWidth,
+    required int gridHeight,
+  }) {
+    var pass = 0;
+    var changed = true;
+    while (changed && pass < math.max(6, config.cleanupPasses + 8)) {
+      changed = false;
+      pass += 1;
+      final components = _buildExactColorComponents(
+        cells: cells,
+        gridWidth: gridWidth,
+        gridHeight: gridHeight,
+      );
+      for (final component in components) {
+        if (_isSimplePathComponent(component)) {
+          continue;
+        }
+        final fixed = _repairComponentTowardsPath(
+          component: component,
+          cells: cells,
+          gridWidth: gridWidth,
+          gridHeight: gridHeight,
+        );
+        changed = changed || fixed;
+      }
+    }
+  }
+
+  bool _repairComponentTowardsPath({
+    required _ExactColorComponent component,
+    required List<EditorCell> cells,
+    required int gridWidth,
+    required int gridHeight,
+  }) {
+    if (component.indices.length == 1) {
+      return _repairSingletonComponent(
+        index: component.indices.first,
+        cells: cells,
+        gridWidth: gridWidth,
+        gridHeight: gridHeight,
+      );
+    }
+
+    final highDegreeCell = component.indices.firstWhere(
+      (index) => component.degrees[index]! > 2,
+      orElse: () => -1,
+    );
+    if (highDegreeCell >= 0) {
+      return _recolorCellToNeighborColor(
+        index: highDegreeCell,
+        forbiddenColor: component.color,
+        cells: cells,
+        gridWidth: gridWidth,
+        gridHeight: gridHeight,
+      );
+    }
+
+    final endpointCount = component.endpoints.length;
+    if (endpointCount > 2) {
+      for (var i = 2; i < component.endpoints.length; i += 1) {
+        if (_recolorCellToNeighborColor(
+          index: component.endpoints[i],
+          forbiddenColor: component.color,
+          cells: cells,
+          gridWidth: gridWidth,
+          gridHeight: gridHeight,
+        )) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    if (endpointCount < 2) {
+      for (final index in component.indices) {
+        if (component.degrees[index] != 2) {
+          continue;
+        }
+        if (_recolorCellToNeighborColor(
+          index: index,
+          forbiddenColor: component.color,
+          cells: cells,
+          gridWidth: gridWidth,
+          gridHeight: gridHeight,
+        )) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  bool _repairSingletonComponent({
+    required int index,
+    required List<EditorCell> cells,
+    required int gridWidth,
+    required int gridHeight,
+  }) {
+    final neighborColors = _neighbors4(
+      index,
+      gridWidth: gridWidth,
+      gridHeight: gridHeight,
+    )
+        .map((it) => cells[it].paintColor)
+        .whereType<Color>()
+        .toSet();
+    for (final color in neighborColors) {
+      if (_wouldViolateSameColorNeighborRule(
+        candidate: index,
+        color: color,
+        outputCells: cells,
+        gridWidth: gridWidth,
+        gridHeight: gridHeight,
+      )) {
+        continue;
+      }
+      cells[index] = EditorCell(paintColor: color);
+      return true;
+    }
+    return false;
+  }
+
+  bool _recolorCellToNeighborColor({
+    required int index,
+    required Color forbiddenColor,
+    required List<EditorCell> cells,
+    required int gridWidth,
+    required int gridHeight,
+  }) {
+    final neighborColors = _neighbors4(
+      index,
+      gridWidth: gridWidth,
+      gridHeight: gridHeight,
+    )
+        .map((it) => cells[it].paintColor)
+        .whereType<Color>()
+        .where((it) => it.toARGB32() != forbiddenColor.toARGB32())
+        .toSet();
+    for (final color in neighborColors) {
+      if (_wouldViolateSameColorNeighborRule(
+        candidate: index,
+        color: color,
+        outputCells: cells,
+        gridWidth: gridWidth,
+        gridHeight: gridHeight,
+      )) {
+        continue;
+      }
+      cells[index] = EditorCell(paintColor: color);
+      return true;
+    }
+    return false;
+  }
+
+  List<_ExactColorComponent> _buildExactColorComponents({
+    required List<EditorCell> cells,
+    required int gridWidth,
+    required int gridHeight,
+  }) {
+    final visited = List<bool>.filled(cells.length, false);
+    final components = <_ExactColorComponent>[];
+    for (var index = 0; index < cells.length; index += 1) {
+      final color = cells[index].paintColor;
+      if (visited[index] || color == null) {
+        continue;
+      }
+      final colorArgb = color.toARGB32();
+      final queue = <int>[index];
+      final indices = <int>[];
+      visited[index] = true;
+      var cursor = 0;
+      while (cursor < queue.length) {
+        final current = queue[cursor];
+        cursor += 1;
+        indices.add(current);
+        for (final neighbor in _neighbors4(
+          current,
+          gridWidth: gridWidth,
+          gridHeight: gridHeight,
+        )) {
+          if (visited[neighbor]) {
+            continue;
+          }
+          if (cells[neighbor].paintColor?.toARGB32() != colorArgb) {
+            continue;
+          }
+          visited[neighbor] = true;
+          queue.add(neighbor);
+        }
+      }
+
+      final degrees = <int, int>{};
+      final endpoints = <int>[];
+      for (final cellIndex in indices) {
+        final degree = _sameColorNeighborCount(
+          cellIndex,
+          cells,
+          gridWidth: gridWidth,
+          gridHeight: gridHeight,
+        );
+        degrees[cellIndex] = degree;
+        if (degree == 1) {
+          endpoints.add(cellIndex);
+        }
+      }
+      components.add(
+        _ExactColorComponent(
+          color: color,
+          indices: indices,
+          degrees: degrees,
+          endpoints: endpoints,
+        ),
+      );
+    }
+    return components;
+  }
+
+  bool _isSimplePathComponent(_ExactColorComponent component) {
+    if (component.indices.length < 2) {
+      return false;
+    }
+    if (component.degrees.values.any((it) => it == 0 || it > 2)) {
+      return false;
+    }
+    if (component.indices.length == 2) {
+      return component.degrees.values.every((it) => it == 1);
+    }
+    if (component.endpoints.length != 2) {
+      return false;
+    }
+    for (final index in component.indices) {
+      final degree = component.degrees[index]!;
+      if (component.endpoints.contains(index)) {
+        if (degree != 1) {
+          return false;
+        }
+      } else if (degree != 2) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  List<Color> _repairColorVariants(Color baseColor) {
+    final hsv = HSVColor.fromColor(baseColor);
+    return <double>[-0.24, 0.24, -0.32, 0.32, -0.16, 0.16, -0.4, 0.4]
+        .map((shift) {
+      final nextValue = (hsv.value + shift).clamp(0.08, 1.0);
+      final nextSaturation = (hsv.saturation + (shift.isNegative ? 0.02 : -0.02))
+          .clamp(0.0, 1.0);
+      return hsv
+          .withValue(nextValue)
+          .withSaturation(nextSaturation)
+          .toColor();
+    }).toList(growable: false);
+  }
+
+  Color _nearestColorNotUsedByNeighbors({
+    required int index,
+    required Color baseColor,
+    required List<EditorCell> outputCells,
+    required int gridWidth,
+    required int gridHeight,
+  }) {
+    final neighborColors = _neighbors4(
+      index,
+      gridWidth: gridWidth,
+      gridHeight: gridHeight,
+    )
+        .map((neighbor) => outputCells[neighbor].paintColor?.toARGB32())
+        .whereType<int>()
+        .toSet();
+    final argb = baseColor.toARGB32();
+    final r = (argb >> 16) & 0xFF;
+    final g = (argb >> 8) & 0xFF;
+    final b = argb & 0xFF;
+    for (var delta = 1; delta <= 32; delta += 1) {
+      final candidates = <Color>[
+        Color.fromARGB(255, (r + delta).clamp(0, 255), g, b),
+        Color.fromARGB(255, (r - delta).clamp(0, 255), g, b),
+        Color.fromARGB(255, r, (g + delta).clamp(0, 255), b),
+        Color.fromARGB(255, r, (g - delta).clamp(0, 255), b),
+        Color.fromARGB(255, r, g, (b + delta).clamp(0, 255)),
+        Color.fromARGB(255, r, g, (b - delta).clamp(0, 255)),
+      ];
+      for (final candidate in candidates) {
+        if (!neighborColors.contains(candidate.toARGB32())) {
+          return candidate;
+        }
+      }
+    }
+    return Color.fromARGB(255, 255 - r, 255 - g, 255 - b);
   }
 
   Iterable<int> _neighbors4(
@@ -592,6 +1118,37 @@ class ReferenceImageLevelGenerator {
     return _neighbors4(index, gridWidth: gridWidth, gridHeight: gridHeight)
         .where((neighbor) => !_isInactive(cells[neighbor]))
         .length;
+  }
+
+  int _sameColorNeighborCount(
+    int index,
+    List<EditorCell> cells, {
+    required int gridWidth,
+    required int gridHeight,
+    int? overrideIndex,
+    Color? overrideColor,
+  }) {
+    final color = index == overrideIndex
+        ? overrideColor
+        : cells[index].paintColor;
+    if (color == null) {
+      return 0;
+    }
+    final colorArgb = color.toARGB32();
+    var count = 0;
+    for (final neighbor in _neighbors4(
+      index,
+      gridWidth: gridWidth,
+      gridHeight: gridHeight,
+    )) {
+      final neighborColor = neighbor == overrideIndex
+          ? overrideColor
+          : cells[neighbor].paintColor;
+      if (neighborColor?.toARGB32() == colorArgb) {
+        count += 1;
+      }
+    }
+    return count;
   }
 
   int _twoByTwoActiveBlockCount(
@@ -702,4 +1259,18 @@ class _GrowthCandidate {
   final int index;
   final bool growAtHead;
   final double score;
+}
+
+class _ExactColorComponent {
+  const _ExactColorComponent({
+    required this.color,
+    required this.indices,
+    required this.degrees,
+    required this.endpoints,
+  });
+
+  final Color color;
+  final List<int> indices;
+  final Map<int, int> degrees;
+  final List<int> endpoints;
 }
