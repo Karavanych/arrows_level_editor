@@ -487,10 +487,15 @@ class EditorController extends ChangeNotifier {
     for (var index = 0; index < nextCells.length; index += 1) {
       final current = nextCells[index];
       final source = sourceState.cells[index];
-      if (current.hasStartMarker == source.hasStartMarker) {
+      if (current.hasStartMarker == source.hasStartMarker &&
+          current.startDirection == source.startDirection) {
         continue;
       }
-      nextCells[index] = current.copyWith(hasStartMarker: source.hasStartMarker);
+      nextCells[index] = current.copyWith(
+        hasStartMarker: source.hasStartMarker,
+        startDirection: source.startDirection,
+        clearStartDirection: !source.hasStartMarker,
+      );
       changed = true;
     }
     if (!changed) {
@@ -713,8 +718,27 @@ class EditorController extends ChangeNotifier {
             );
             _recordCellChange(componentIndex, _state.cells[componentIndex]);
           }
+          final validDirections = _validStartDirectionsForCell(
+            cellIndex: index,
+            colorArgb: targetColorArgb,
+            cells: nextCells,
+          );
+          if (validDirections.isEmpty) {
+            return;
+          }
+          final nextDirection = current.hasStartMarker
+              ? _nextCycledDirection(
+                  current: nextCells[index].startDirection,
+                  validDirections: validDirections,
+                )
+              : validDirections.first;
+          nextCells[index] = nextCells[index].copyWith(
+            hasStartMarker: true,
+            startDirection: nextDirection,
+          );
+          break;
         }
-        nextCells[index] = nextCells[index].copyWith(hasStartMarker: true);
+        return;
       case EditorTool.erase:
         nextCells[index] = const EditorCell();
     }
@@ -759,6 +783,63 @@ class EditorController extends ChangeNotifier {
     }
 
     return visited;
+  }
+
+  List<StartDirection> _validStartDirectionsForCell({
+    required int cellIndex,
+    required int colorArgb,
+    required List<EditorCell> cells,
+  }) {
+    final directions = <StartDirection>[];
+    for (final direction in StartDirection.values) {
+      final behind = _behindNeighborIndex(cellIndex: cellIndex, direction: direction);
+      if (behind == null) {
+        continue;
+      }
+      final neighbor = cells[behind];
+      if (neighbor.isInactive || neighbor.paintColor?.toARGB32() != colorArgb) {
+        continue;
+      }
+      directions.add(direction);
+    }
+    return directions;
+  }
+
+  StartDirection _nextCycledDirection({
+    required StartDirection? current,
+    required List<StartDirection> validDirections,
+  }) {
+    if (validDirections.isEmpty) {
+      return StartDirection.right;
+    }
+    final currentIndex = current == null ? -1 : validDirections.indexOf(current);
+    if (currentIndex < 0) {
+      return validDirections.first;
+    }
+    final nextIndex = (currentIndex + 1) % validDirections.length;
+    return validDirections[nextIndex];
+  }
+
+  int? _behindNeighborIndex({
+    required int cellIndex,
+    required StartDirection direction,
+  }) {
+    final width = _state.gridSize.width;
+    final height = _state.gridSize.height;
+    final x = cellIndex % width;
+    final y = cellIndex ~/ width;
+    final (dx, dy) = switch (direction) {
+      StartDirection.right => (-1, 0),
+      StartDirection.down => (0, -1),
+      StartDirection.left => (1, 0),
+      StartDirection.up => (0, 1),
+    };
+    final nx = x + dx;
+    final ny = y + dy;
+    if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+      return null;
+    }
+    return ny * width + nx;
   }
 
   Iterable<int> _neighbors4(int index) sync* {
@@ -842,7 +923,8 @@ class EditorController extends ChangeNotifier {
     final bColor = b.paintColor;
     return aColor?.toARGB32() == bColor?.toARGB32() &&
         a.isInactive == b.isInactive &&
-        a.hasStartMarker == b.hasStartMarker;
+        a.hasStartMarker == b.hasStartMarker &&
+        a.startDirection == b.startDirection;
   }
 
   bool _statesEqual(EditorState a, EditorState b) {

@@ -124,6 +124,20 @@ class EditorCheckPreviewSimulationService {
 
   int _findStartIndex(EditorState state, ColorConnectedComponent component) {
     for (final index in component.cellIndices) {
+      final cell = state.cells[index];
+      if (!cell.hasStartMarker || cell.startDirection == null) {
+        continue;
+      }
+      final validDirections = _validStartDirectionsForCell(
+        state: state,
+        cellIndex: index,
+        colorArgb: component.colorArgb,
+      );
+      if (validDirections.contains(cell.startDirection)) {
+        return index;
+      }
+    }
+    for (final index in component.cellIndices) {
       if (state.cells[index].hasStartMarker) {
         return index;
       }
@@ -136,31 +150,26 @@ class EditorCheckPreviewSimulationService {
     required ColorConnectedComponent component,
     required int startIndex,
   }) {
-    final width = state.gridSize.width;
-    final height = state.gridSize.height;
-    final startX = startIndex % width;
-    final startY = startIndex ~/ width;
-    final colorArgb = component.colorArgb;
-    final candidates = <({int x, int y})>[
-      (x: startX - 1, y: startY),
-      (x: startX + 1, y: startY),
-      (x: startX, y: startY - 1),
-      (x: startX, y: startY + 1),
-    ];
-    for (final candidate in candidates) {
-      if (candidate.x < 0 ||
-          candidate.y < 0 ||
-          candidate.x >= width ||
-          candidate.y >= height) {
-        continue;
+    final startCell = state.cells[startIndex];
+    final storedDirection = startCell.startDirection;
+    if (storedDirection != null) {
+      final validDirections = _validStartDirectionsForCell(
+        state: state,
+        cellIndex: startIndex,
+        colorArgb: component.colorArgb,
+      );
+      if (validDirections.contains(storedDirection)) {
+        return _vectorForDirection(storedDirection);
       }
-      final neighborIndex = candidate.y * width + candidate.x;
-      final neighborCell = state.cells[neighborIndex];
-      final neighborColor = neighborCell.paintColor?.toARGB32();
-      if (neighborCell.isInactive || neighborColor != colorArgb) {
-        continue;
-      }
-      return (dx: startX - candidate.x, dy: startY - candidate.y);
+    }
+
+    final fallbackDirections = _validStartDirectionsForCell(
+      state: state,
+      cellIndex: startIndex,
+      colorArgb: component.colorArgb,
+    );
+    if (fallbackDirections.isNotEmpty) {
+      return _vectorForDirection(fallbackDirections.first);
     }
     return null;
   }
@@ -203,7 +212,19 @@ class EditorCheckPreviewSimulationService {
         continue;
       }
 
-      working.replaceComponentStarts(component, oppositeEndpoint);
+      final swappedDirections = _validStartDirectionsForCell(
+        state: stateBeforeSwap,
+        cellIndex: oppositeEndpoint,
+        colorArgb: component.colorArgb,
+      );
+      if (swappedDirections.isEmpty) {
+        continue;
+      }
+      working.replaceComponentStarts(
+        component,
+        oppositeEndpoint,
+        swappedDirections.first,
+      );
       final stateAfterSwap = working.toState(baseState);
       final swappedStart = _findStartIndex(stateAfterSwap, component);
       final direction = _deriveForwardDirection(
@@ -218,7 +239,18 @@ class EditorCheckPreviewSimulationService {
             dx: direction.dx,
             dy: direction.dy,
           )) {
-        working.replaceComponentStarts(component, startIndex);
+        final restoreDirections = _validStartDirectionsForCell(
+          state: stateAfterSwap,
+          cellIndex: startIndex,
+          colorArgb: component.colorArgb,
+        );
+        working.replaceComponentStarts(
+          component,
+          startIndex,
+          restoreDirections.isEmpty
+              ? StartDirection.right
+              : restoreDirections.first,
+        );
         continue;
       }
 
@@ -273,6 +305,62 @@ class EditorCheckPreviewSimulationService {
     }
     return null;
   }
+
+  List<StartDirection> _validStartDirectionsForCell({
+    required EditorState state,
+    required int cellIndex,
+    required int colorArgb,
+  }) {
+    final directions = <StartDirection>[];
+    for (final direction in StartDirection.values) {
+      final behindIndex = _behindNeighborIndex(
+        state: state,
+        cellIndex: cellIndex,
+        direction: direction,
+      );
+      if (behindIndex == null) {
+        continue;
+      }
+      final behindCell = state.cells[behindIndex];
+      if (!behindCell.isInactive &&
+          behindCell.paintColor?.toARGB32() == colorArgb) {
+        directions.add(direction);
+      }
+    }
+    return directions;
+  }
+
+  int? _behindNeighborIndex({
+    required EditorState state,
+    required int cellIndex,
+    required StartDirection direction,
+  }) {
+    final width = state.gridSize.width;
+    final height = state.gridSize.height;
+    final x = cellIndex % width;
+    final y = cellIndex ~/ width;
+    final (dx, dy) = switch (direction) {
+      StartDirection.right => (-1, 0),
+      StartDirection.down => (0, -1),
+      StartDirection.left => (1, 0),
+      StartDirection.up => (0, 1),
+    };
+    final nx = x + dx;
+    final ny = y + dy;
+    if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+      return null;
+    }
+    return ny * width + nx;
+  }
+
+  ({int dx, int dy}) _vectorForDirection(StartDirection direction) {
+    return switch (direction) {
+      StartDirection.right => (dx: 1, dy: 0),
+      StartDirection.down => (dx: 0, dy: 1),
+      StartDirection.left => (dx: -1, dy: 0),
+      StartDirection.up => (dx: 0, dy: -1),
+    };
+  }
 }
 
 class _WorkingCopy {
@@ -289,21 +377,37 @@ class _WorkingCopy {
     }
   }
 
-  void replaceComponentStarts(ColorConnectedComponent component, int startIndex) {
+  void replaceComponentStarts(
+    ColorConnectedComponent component,
+    int startIndex,
+    StartDirection startDirection,
+  ) {
     for (final index in component.cellIndices) {
       final current = _cells[index];
       if (current.hasStartMarker) {
-        _cells[index] = current.copyWith(hasStartMarker: false);
+        _cells[index] = current.copyWith(
+          hasStartMarker: false,
+          clearStartDirection: true,
+        );
       }
       final startPlanCurrent = _startPlanCells[index];
       if (startPlanCurrent.hasStartMarker) {
-        _startPlanCells[index] = startPlanCurrent.copyWith(hasStartMarker: false);
+        _startPlanCells[index] = startPlanCurrent.copyWith(
+          hasStartMarker: false,
+          clearStartDirection: true,
+        );
       }
     }
     final currentStart = _cells[startIndex];
-    _cells[startIndex] = currentStart.copyWith(hasStartMarker: true);
+    _cells[startIndex] = currentStart.copyWith(
+      hasStartMarker: true,
+      startDirection: startDirection,
+    );
     final startPlanStart = _startPlanCells[startIndex];
-    _startPlanCells[startIndex] = startPlanStart.copyWith(hasStartMarker: true);
+    _startPlanCells[startIndex] = startPlanStart.copyWith(
+      hasStartMarker: true,
+      startDirection: startDirection,
+    );
   }
 
   EditorState toState(EditorState baseState) {

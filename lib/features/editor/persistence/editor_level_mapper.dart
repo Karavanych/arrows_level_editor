@@ -22,7 +22,13 @@ class EditorLevelMapper {
       final y = index ~/ width;
 
       if (cell.hasStartMarker) {
-        startPoints.add(ALevelStartPoint(x: x, y: y));
+        startPoints.add(
+          ALevelStartPoint(
+            x: x,
+            y: y,
+            direction: _toPersistedStartDirection(cell.startDirection),
+          ),
+        );
       }
 
       if (cell.isInactive) {
@@ -73,7 +79,10 @@ class EditorLevelMapper {
         continue;
       }
       final current = cells[index];
-      cells[index] = current.copyWith(hasStartMarker: true);
+      cells[index] = current.copyWith(
+        hasStartMarker: true,
+        startDirection: _fromPersistedStartDirection(point.direction),
+      );
     }
 
     return EditorState(
@@ -83,5 +92,32 @@ class EditorLevelMapper {
       selectedTool: selectedTool,
       paletteColors: paletteColors,
     );
+  }
+
+  ALevelStartDirection _toPersistedStartDirection(StartDirection? direction) {
+    switch (direction) {
+      case StartDirection.down:
+        return ALevelStartDirection.down;
+      case StartDirection.left:
+        return ALevelStartDirection.left;
+      case StartDirection.up:
+        return ALevelStartDirection.up;
+      case StartDirection.right:
+      case null:
+        return ALevelStartDirection.right;
+    }
+  }
+
+  StartDirection _fromPersistedStartDirection(ALevelStartDirection direction) {
+    switch (direction) {
+      case ALevelStartDirection.down:
+        return StartDirection.down;
+      case ALevelStartDirection.left:
+        return StartDirection.left;
+      case ALevelStartDirection.up:
+        return StartDirection.up;
+      case ALevelStartDirection.right:
+        return StartDirection.right;
+    }
   }
 }

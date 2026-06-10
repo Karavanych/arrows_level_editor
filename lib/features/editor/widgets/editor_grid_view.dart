@@ -724,9 +724,36 @@ class _GridPainter extends CustomPainter {
         }
 
         if (cell.hasStartMarker) {
+          final center = rect.center;
           canvas
-            ..drawCircle(rect.center, 9, markerFillPaint)
-            ..drawCircle(rect.center, 9, markerBorderPaint);
+            ..drawCircle(center, 9, markerFillPaint)
+            ..drawCircle(center, 9, markerBorderPaint);
+          final arrowPaint = Paint()
+            ..color = Colors.black87
+            ..strokeWidth = 2
+            ..strokeCap = StrokeCap.round
+            ..style = PaintingStyle.stroke;
+          final direction = cell.startDirection ?? StartDirection.right;
+          final (vx, vy) = switch (direction) {
+            StartDirection.right => (1.0, 0.0),
+            StartDirection.down => (0.0, 1.0),
+            StartDirection.left => (-1.0, 0.0),
+            StartDirection.up => (0.0, -1.0),
+          };
+          final start = center + Offset(vx * 11, vy * 11);
+          final end = start + Offset(vx * 10, vy * 10);
+          canvas.drawLine(start, end, arrowPaint);
+          final leftWing = Offset(
+            end.dx - (vx * 4) - (vy * 3),
+            end.dy - (vy * 4) + (vx * 3),
+          );
+          final rightWing = Offset(
+            end.dx - (vx * 4) + (vy * 3),
+            end.dy - (vy * 4) - (vx * 3),
+          );
+          canvas
+            ..drawLine(end, leftWing, arrowPaint)
+            ..drawLine(end, rightWing, arrowPaint);
         }
 
         final isSelected = state.selectedCellIndex == index;

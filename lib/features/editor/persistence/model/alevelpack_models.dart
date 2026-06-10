@@ -105,22 +105,35 @@ class ALevelPackPalette {
 }
 
 class ALevelStartPoint {
-  const ALevelStartPoint({required this.x, required this.y});
+  const ALevelStartPoint({
+    required this.x,
+    required this.y,
+    this.direction = ALevelStartDirection.right,
+  });
 
   final int x;
   final int y;
+  final ALevelStartDirection direction;
 
   Map<String, Object?> toJson() {
-    return {'x': x, 'y': y};
+    return {'x': x, 'y': y, 'direction': direction.name};
   }
 
   factory ALevelStartPoint.fromJson(Map<String, dynamic> json) {
+    final rawDirection = json['direction'] as String?;
+    final parsedDirection = ALevelStartDirection.values.firstWhere(
+      (it) => it.name == rawDirection,
+      orElse: () => ALevelStartDirection.right,
+    );
     return ALevelStartPoint(
       x: json['x'] as int? ?? 0,
       y: json['y'] as int? ?? 0,
+      direction: parsedDirection,
     );
   }
 }
+
+enum ALevelStartDirection { right, down, left, up }
 
 class ALevelLevelMeta {
   const ALevelLevelMeta({required this.startPoints, this.checked = false});

@@ -12,22 +12,29 @@ class EditorCell {
     this.paintColor,
     this.isInactive = false,
     this.hasStartMarker = false,
+    this.startDirection,
   });
 
   final Color? paintColor;
   final bool isInactive;
   final bool hasStartMarker;
+  final StartDirection? startDirection;
 
   EditorCell copyWith({
     Color? paintColor,
     bool clearPaintColor = false,
     bool? isInactive,
     bool? hasStartMarker,
+    StartDirection? startDirection,
+    bool clearStartDirection = false,
   }) {
     return EditorCell(
       paintColor: clearPaintColor ? null : (paintColor ?? this.paintColor),
       isInactive: isInactive ?? this.isInactive,
       hasStartMarker: hasStartMarker ?? this.hasStartMarker,
+      startDirection: clearStartDirection
+          ? null
+          : (startDirection ?? this.startDirection),
     );
   }
 }
@@ -55,6 +62,8 @@ class EditorStrokeChange {
 enum EditorTool { paint, inactive, startMarker, erase }
 
 enum BrushApplicationMode { point, line }
+
+enum StartDirection { right, down, left, up }
 
 class EditorState {
   const EditorState({
