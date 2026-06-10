@@ -100,12 +100,12 @@ class EditorCheckPreviewSimulationService {
         );
       }
 
-      final startsChanged = _flipBlockedStartsToOpposite(
-        state: working.toState(baseState),
+      final removedWithOppositeStart = _tryRemoveBlockedComponentWithOppositeStart(
+        working: working,
+        baseState: baseState,
         components: components,
-        applyStartChange: working.replaceComponentStarts,
       );
-      if (!startsChanged) {
+      if (!removedWithOppositeStart) {
         return CheckPreviewSimulationOutcome(
           passed: false,
           finalState: working.toState(baseState),
@@ -116,6 +116,9 @@ class EditorCheckPreviewSimulationService {
       }
       usedOppositeStarts = true;
       await onStep(working.toState(baseState), 'running');
+      if (stepDelay > Duration.zero) {
+        await Future<void>.delayed(stepDelay);
+      }
     }
   }
 
@@ -183,62 +186,92 @@ class EditorCheckPreviewSimulationService {
     return false;
   }
 
-  bool _flipBlockedStartsToOpposite({
-    required EditorState state,
+  bool _tryRemoveBlockedComponentWithOppositeStart({
+    required _WorkingCopy working,
+    required EditorState baseState,
     required List<ColorConnectedComponent> components,
-    required void Function(ColorConnectedComponent component, int startIndex)
-    applyStartChange,
   }) {
-    final width = state.gridSize.width;
-    final height = state.gridSize.height;
-    var changedAny = false;
-
     for (final component in components) {
-      final startIndex = _findStartIndex(state, component);
-      final endpoints = <int>[];
-      for (final index in component.cellIndices) {
-        var sameColorNeighbors = 0;
-        final x = index % width;
-        final y = index ~/ width;
-        final neighbors = <({int x, int y})>[
-          (x: x - 1, y: y),
-          (x: x + 1, y: y),
-          (x: x, y: y - 1),
-          (x: x, y: y + 1),
-        ];
-        for (final neighbor in neighbors) {
-          if (neighbor.x < 0 ||
-              neighbor.y < 0 ||
-              neighbor.x >= width ||
-              neighbor.y >= height) {
-            continue;
-          }
-          final neighborCell = state.cells[neighbor.y * width + neighbor.x];
-          final neighborColor = neighborCell.paintColor?.toARGB32();
-          if (!neighborCell.isInactive && neighborColor == component.colorArgb) {
-            sameColorNeighbors += 1;
-          }
-        }
-        if (sameColorNeighbors == 1) {
-          endpoints.add(index);
-        }
-      }
-
-      int? oppositeEndpoint;
-      for (final endpoint in endpoints) {
-        if (endpoint != startIndex) {
-          oppositeEndpoint = endpoint;
-          break;
-        }
-      }
+      final stateBeforeSwap = working.toState(baseState);
+      final startIndex = _findStartIndex(stateBeforeSwap, component);
+      final oppositeEndpoint = _findOppositeEndpoint(
+        state: stateBeforeSwap,
+        component: component,
+        startIndex: startIndex,
+      );
       if (oppositeEndpoint == null) {
         continue;
       }
-      applyStartChange(component, oppositeEndpoint);
-      changedAny = true;
+
+      working.replaceComponentStarts(component, oppositeEndpoint);
+      final stateAfterSwap = working.toState(baseState);
+      final swappedStart = _findStartIndex(stateAfterSwap, component);
+      final direction = _deriveForwardDirection(
+        state: stateAfterSwap,
+        component: component,
+        startIndex: swappedStart,
+      );
+      if (direction == null ||
+          _hasOccupiedAhead(
+            state: stateAfterSwap,
+            startIndex: swappedStart,
+            dx: direction.dx,
+            dy: direction.dy,
+          )) {
+        working.replaceComponentStarts(component, startIndex);
+        continue;
+      }
+
+      working.removeComponent(component);
+      return true;
     }
 
-    return changedAny;
+    return false;
+  }
+
+  int? _findOppositeEndpoint({
+    required EditorState state,
+    required ColorConnectedComponent component,
+    required int startIndex,
+  }) {
+    final width = state.gridSize.width;
+    final height = state.gridSize.height;
+    final endpoints = <int>[];
+
+    for (final index in component.cellIndices) {
+      var sameColorNeighbors = 0;
+      final x = index % width;
+      final y = index ~/ width;
+      final neighbors = <({int x, int y})>[
+        (x: x - 1, y: y),
+        (x: x + 1, y: y),
+        (x: x, y: y - 1),
+        (x: x, y: y + 1),
+      ];
+      for (final neighbor in neighbors) {
+        if (neighbor.x < 0 ||
+            neighbor.y < 0 ||
+            neighbor.x >= width ||
+            neighbor.y >= height) {
+          continue;
+        }
+        final neighborCell = state.cells[neighbor.y * width + neighbor.x];
+        final neighborColor = neighborCell.paintColor?.toARGB32();
+        if (!neighborCell.isInactive && neighborColor == component.colorArgb) {
+          sameColorNeighbors += 1;
+        }
+      }
+      if (sameColorNeighbors == 1) {
+        endpoints.add(index);
+      }
+    }
+
+    for (final endpoint in endpoints) {
+      if (endpoint != startIndex) {
+        return endpoint;
+      }
+    }
+    return null;
   }
 }
 
