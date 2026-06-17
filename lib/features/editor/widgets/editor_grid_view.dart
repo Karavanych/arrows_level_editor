@@ -15,6 +15,7 @@ class EditorGridView extends StatefulWidget {
     required this.onEraseStrokeEnd,
     required this.onEditorInteractionStart,
     required this.onColorPick,
+    this.isPaintColorPickEnabled = true,
     this.isLineModeEnabled = false,
     this.highlightedErrorCells = const {},
     this.highlightedErrorColor = Colors.redAccent,
@@ -29,6 +30,7 @@ class EditorGridView extends StatefulWidget {
   final VoidCallback onEraseStrokeEnd;
   final VoidCallback onEditorInteractionStart;
   final ValueChanged<Color> onColorPick;
+  final bool isPaintColorPickEnabled;
   final bool isLineModeEnabled;
   final Set<int> highlightedErrorCells;
   final Color highlightedErrorColor;
@@ -406,6 +408,9 @@ class _EditorGridViewState extends State<EditorGridView> {
   }
 
   bool _canPickColorFromCell(int index) {
+    if (!widget.isPaintColorPickEnabled) {
+      return false;
+    }
     if (widget.state.selectedTool != EditorTool.paint) {
       return false;
     }

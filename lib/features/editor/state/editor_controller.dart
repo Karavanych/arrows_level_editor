@@ -78,6 +78,8 @@ class EditorController extends ChangeNotifier {
   bool get isLineBrushModeEnabledForCurrentTool =>
       _brushApplicationMode == BrushApplicationMode.line &&
       _state.selectedTool != EditorTool.startMarker;
+  bool get isRecolorModeAvailableForCurrentTool =>
+      _state.selectedTool == EditorTool.paint;
   Color get inactiveReservedColor => EditorLevelMapper.inactiveColor;
 
   Future<void> createLevel({
@@ -550,11 +552,19 @@ class EditorController extends ChangeNotifier {
   }
 
   void selectTool(EditorTool tool) {
+    if (tool != EditorTool.paint &&
+        _brushApplicationMode == BrushApplicationMode.recolor) {
+      _brushApplicationMode = BrushApplicationMode.point;
+    }
     _state = _state.copyWith(selectedTool: tool);
     notifyListeners();
   }
 
   void setBrushApplicationMode(BrushApplicationMode mode) {
+    if (mode == BrushApplicationMode.recolor &&
+        _state.selectedTool != EditorTool.paint) {
+      return;
+    }
     if (_brushApplicationMode == mode) {
       return;
     }
@@ -727,6 +737,16 @@ class EditorController extends ChangeNotifier {
         current.paintColor == null && !current.isInactive;
     switch (_state.selectedTool) {
       case EditorTool.paint:
+        if (_brushApplicationMode == BrushApplicationMode.recolor) {
+          final recolored = _tryRecolorConnectedPaintComponent(
+            startIndex: index,
+            cells: nextCells,
+          );
+          if (!recolored) {
+            return;
+          }
+          break;
+        }
         if (!isEmptyForPaintOrInactive) {
           return;
         }
@@ -796,6 +816,56 @@ class EditorController extends ChangeNotifier {
     _recordCellChange(index, current);
     _markCurrentLevelEdited();
     notifyListeners();
+  }
+
+  bool _tryRecolorConnectedPaintComponent({
+    required int startIndex,
+    required List<EditorCell> cells,
+  }) {
+    final startCell = _state.cells[startIndex];
+    final sourceColorArgb = startCell.paintColor?.toARGB32();
+    if (startCell.isInactive || sourceColorArgb == null) {
+      return false;
+    }
+    final targetColorArgb = _state.selectedColor.toARGB32();
+    if (sourceColorArgb == targetColorArgb) {
+      return false;
+    }
+
+    final component = _collectSameColorComponentIndices(
+      startIndex: startIndex,
+      colorArgb: sourceColorArgb,
+      cells: _state.cells,
+    );
+
+    for (final componentIndex in component) {
+      for (final neighbor in _neighbors4(componentIndex)) {
+        if (component.contains(neighbor)) {
+          continue;
+        }
+        final neighborCell = _state.cells[neighbor];
+        if (!neighborCell.isInactive &&
+            neighborCell.paintColor?.toARGB32() == targetColorArgb) {
+          return false;
+        }
+      }
+    }
+
+    var changed = false;
+    for (final componentIndex in component) {
+      final before = _state.cells[componentIndex];
+      final after = cells[componentIndex].copyWith(
+        paintColor: _state.selectedColor,
+        isInactive: false,
+      );
+      if (_cellsEqual(before, after)) {
+        continue;
+      }
+      cells[componentIndex] = after;
+      _recordCellChange(componentIndex, before);
+      changed = true;
+    }
+    return changed;
   }
 
   Set<int> _collectSameColorComponentIndices({

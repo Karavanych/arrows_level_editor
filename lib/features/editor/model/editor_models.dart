@@ -61,7 +61,7 @@ class EditorStrokeChange {
 
 enum EditorTool { paint, inactive, startMarker, erase }
 
-enum BrushApplicationMode { point, line }
+enum BrushApplicationMode { point, line, recolor }
 
 enum StartDirection { right, down, left, up }
 

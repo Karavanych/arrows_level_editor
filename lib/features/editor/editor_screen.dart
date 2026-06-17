@@ -1125,7 +1125,7 @@ class _EditorScreenState extends State<EditorScreen> {
                           const SizedBox(height: 8),
                           _buildToolSelector(state),
                           const SizedBox(height: 12),
-                          _buildBrushModeSelector(),
+                          _buildBrushModeSelector(state),
                           const SizedBox(height: 20),
                           Text(
                             'Color Palette',
@@ -1158,6 +1158,9 @@ class _EditorScreenState extends State<EditorScreen> {
                             onEditorInteractionStart: _onGridInteractionStart,
                             onColorPick:
                                 _controller.selectColorAndActivatePaint,
+                            isPaintColorPickEnabled:
+                                _controller.brushApplicationMode !=
+                                BrushApplicationMode.recolor,
                             highlightedErrorCells: _isBlinkOn
                                 ? Set<int>.from(_highlightedErrorCells)
                                 : const <int>{},
@@ -1239,8 +1242,11 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-  Widget _buildBrushModeSelector() {
+  Widget _buildBrushModeSelector(EditorState state) {
     final selectedMode = _controller.brushApplicationMode;
+    final recolorEnabled =
+        state.selectedTool == EditorTool.paint &&
+        _controller.isRecolorModeAvailableForCurrentTool;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1250,22 +1256,31 @@ class _EditorScreenState extends State<EditorScreen> {
         ),
         const SizedBox(height: 6),
         SegmentedButton<BrushApplicationMode>(
-          segments: const [
+          segments: [
             ButtonSegment<BrushApplicationMode>(
               value: BrushApplicationMode.point,
               icon: Icon(Icons.grid_on, size: 16),
-              label: Text('Point'),
+              label: Text('Dot'),
             ),
             ButtonSegment<BrushApplicationMode>(
               value: BrushApplicationMode.line,
-              icon: Icon(Icons.horizontal_rule, size: 18),
+              icon: Icon(Icons.horizontal_rule, size: 16),
               label: Text('Line'),
+            ),
+            ButtonSegment<BrushApplicationMode>(
+              value: BrushApplicationMode.recolor,
+              icon: Icon(Icons.format_color_fill, size: 16),
+              label: Text('Fill'),
+              enabled: recolorEnabled,
             ),
           ],
           selected: {selectedMode},
           onSelectionChanged: (selection) {
             final next = selection.firstOrNull;
             if (next == null) {
+              return;
+            }
+            if (next == BrushApplicationMode.recolor && !recolorEnabled) {
               return;
             }
             _controller.setBrushApplicationMode(next);
