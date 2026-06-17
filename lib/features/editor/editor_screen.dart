@@ -35,6 +35,10 @@ class _EditorScreenState extends State<EditorScreen> {
   bool _isBusy = false;
   bool _isDraggingReferenceImages = false;
   final List<String> _referenceImagePaths = <String>[];
+  int? _editingPaletteIndex;
+  Color? _paletteEditorColor;
+  Offset _paletteEditorOffset = const Offset(320, 120);
+  bool _isPaletteEyedropperActive = false;
   String? _lastSyncedLevelId;
   int? _lastSyncedLevelWidth;
   int? _lastSyncedLevelHeight;
@@ -775,77 +779,47 @@ class _EditorScreenState extends State<EditorScreen> {
     if (_isBusy) {
       return;
     }
+    setState(() {
+      _editingPaletteIndex = index;
+      _paletteEditorColor = initialColor;
+      _isPaletteEyedropperActive = false;
+    });
+  }
 
-    var candidateColor = initialColor;
-    final reservedInactiveColor = _controller.inactiveReservedColor;
-    final reservedArgb = reservedInactiveColor.toARGB32();
-    String? validationMessage;
+  bool get _isPaletteEditorVisible =>
+      _editingPaletteIndex != null && _paletteEditorColor != null;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final selectedArgb = candidateColor.toARGB32();
-            final isReserved = selectedArgb == reservedArgb;
-            validationMessage = isReserved
-                ? 'This color is reserved for inactive cells and cannot be used in palette slots.'
-                : null;
-            return AlertDialog(
-              title: const Text('Edit palette color'),
-              content: SizedBox(
-                width: 360,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ColorPicker(
-                      pickerColor: candidateColor,
-                      onColorChanged: (next) {
-                        setDialogState(() {
-                          candidateColor = next;
-                        });
-                      },
-                      enableAlpha: false,
-                      displayThumbColor: true,
-                      portraitOnly: true,
-                    ),
-                    if (validationMessage != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        validationMessage!,
-                        style: const TextStyle(color: Colors.red),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(false),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: isReserved
-                      ? null
-                      : () => Navigator.of(dialogContext).pop(true),
-                  child: const Text('Apply'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-    if (confirmed != true) {
+  bool get _isPaletteEditorColorReserved {
+    final color = _paletteEditorColor;
+    if (color == null) {
+      return false;
+    }
+    return color.toARGB32() == _controller.inactiveReservedColor.toARGB32();
+  }
+
+  void _closePaletteEditor() {
+    setState(() {
+      _editingPaletteIndex = null;
+      _paletteEditorColor = null;
+      _isPaletteEyedropperActive = false;
+    });
+  }
+
+  Future<void> _applyPaletteEditorColor() async {
+    final index = _editingPaletteIndex;
+    final color = _paletteEditorColor;
+    if (index == null || color == null || _isPaletteEditorColorReserved || _isBusy) {
       return;
     }
-
     setState(() {
       _isBusy = true;
     });
     try {
-      await _controller.updatePaletteColorAt(index: index, color: candidateColor);
+      await _controller.updatePaletteColorAt(index: index, color: color);
+      if (!mounted) {
+        return;
+      }
+      _closePaletteEditor();
     } catch (error) {
       if (!mounted) {
         return;
@@ -858,6 +832,183 @@ class _EditorScreenState extends State<EditorScreen> {
         });
       }
     }
+  }
+
+  void _togglePaletteEyedropper() {
+    if (!_isPaletteEditorVisible) {
+      return;
+    }
+    setState(() {
+      _isPaletteEyedropperActive = !_isPaletteEyedropperActive;
+    });
+  }
+
+  void _handleInAppEyedropperColorPicked(Color color) {
+    if (!_isPaletteEditorVisible || !_isPaletteEyedropperActive) {
+      return;
+    }
+    setState(() {
+      _paletteEditorColor = color;
+      _isPaletteEyedropperActive = false;
+    });
+  }
+
+  void _handleGridColorPick(Color color) {
+    if (_isPaletteEyedropperActive) {
+      _handleInAppEyedropperColorPicked(color);
+      return;
+    }
+    _controller.selectColorAndActivatePaint(color);
+  }
+
+  void _handlePaletteColorTap(Color color) {
+    if (_isPaletteEyedropperActive) {
+      _handleInAppEyedropperColorPicked(color);
+      return;
+    }
+    _controller.selectColorAndActivatePaint(color);
+  }
+
+  Widget _buildFloatingPaletteEditor(Size viewportSize) {
+    final color = _paletteEditorColor;
+    if (!_isPaletteEditorVisible || color == null) {
+      return const SizedBox.shrink();
+    }
+    const panelWidth = 380.0;
+    const panelHeight = 510.0;
+    final maxX = (viewportSize.width - panelWidth).clamp(0.0, double.infinity);
+    final maxY = (viewportSize.height - panelHeight).clamp(0.0, double.infinity);
+    final clampedOffset = Offset(
+      _paletteEditorOffset.dx.clamp(0.0, maxX),
+      _paletteEditorOffset.dy.clamp(0.0, maxY),
+    );
+    if (clampedOffset != _paletteEditorOffset) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _paletteEditorOffset = clampedOffset;
+        });
+      });
+    }
+    final validationMessage = _isPaletteEditorColorReserved
+        ? 'Белый цвет зарезервирован для неактивных клеток и не может использоваться в палитре.'
+        : null;
+
+    return Positioned(
+      left: clampedOffset.dx,
+      top: clampedOffset.dy,
+      width: panelWidth,
+      child: Material(
+        elevation: 12,
+        borderRadius: BorderRadius.circular(12),
+        color: Theme.of(context).colorScheme.surface,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              onPanUpdate: (details) {
+                setState(() {
+                  _paletteEditorOffset += details.delta;
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Colors.black12)),
+                ),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Редактор цвета палитры',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Закрыть',
+                      onPressed: _closePaletteEditor,
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _togglePaletteEyedropper,
+                        icon: Icon(
+                          Icons.colorize,
+                          color: _isPaletteEyedropperActive ? Colors.blue : null,
+                        ),
+                        label: Text(
+                          _isPaletteEyedropperActive
+                              ? 'Пипетка: вкл'
+                              : 'Пипетка',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _isPaletteEyedropperActive
+                              ? 'Кликните по цвету на поле или в палитре.'
+                              : 'Выберите цвет ниже или пипеткой.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ColorPicker(
+                    pickerColor: color,
+                    onColorChanged: (next) {
+                      setState(() {
+                        _paletteEditorColor = next;
+                      });
+                    },
+                    enableAlpha: false,
+                    displayThumbColor: true,
+                    portraitOnly: true,
+                  ),
+                  if (validationMessage != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      validationMessage,
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: _isBusy ? null : _closePaletteEditor,
+                        child: const Text('Отмена'),
+                      ),
+                      const Spacer(),
+                      FilledButton(
+                        onPressed:
+                            _isBusy || _isPaletteEditorColorReserved
+                                ? null
+                                : _applyPaletteEditorColor,
+                        child: const Text('Применить'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _blinkProblemCells(Set<int> cells) async {
@@ -1081,19 +1232,27 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: Focus(
-          autofocus: true,
-          focusNode: _focusNode,
-          onKeyEvent: (_, event) => _handleEditorKeyEvent(event),
-          child: AnimatedBuilder(
-            animation: _controller,
-            builder: (context, _) {
-              final state = _controller.state;
-              _syncDimensionInputsWithCurrentLevel(state);
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+      body: MouseRegion(
+        cursor: _isPaletteEyedropperActive
+            ? SystemMouseCursors.precise
+            : MouseCursor.defer,
+        child: SafeArea(
+          child: Focus(
+            autofocus: true,
+            focusNode: _focusNode,
+            onKeyEvent: (_, event) => _handleEditorKeyEvent(event),
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) {
+                final state = _controller.state;
+                _syncDimensionInputsWithCurrentLevel(state);
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    return Stack(
+                      children: [
+                        Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                   Container(
                     width: 280,
                     padding: const EdgeInsets.all(16),
@@ -1156,11 +1315,11 @@ class _EditorScreenState extends State<EditorScreen> {
                             onEraseCellDrag: _controller.eraseCell,
                             onEraseStrokeEnd: _controller.endEraseStroke,
                             onEditorInteractionStart: _onGridInteractionStart,
-                            onColorPick:
-                                _controller.selectColorAndActivatePaint,
+                            onColorPick: _handleGridColorPick,
                             isPaintColorPickEnabled:
+                                _isPaletteEyedropperActive ||
                                 _controller.brushApplicationMode !=
-                                BrushApplicationMode.recolor,
+                                    BrushApplicationMode.recolor,
                             highlightedErrorCells: _isBlinkOn
                                 ? Set<int>.from(_highlightedErrorCells)
                                 : const <int>{},
@@ -1178,9 +1337,21 @@ class _EditorScreenState extends State<EditorScreen> {
                     ),
                     child: _buildRightPanel(state),
                   ),
-                ],
-              );
-            },
+                          ],
+                        ),
+                        if (_isPaletteEditorVisible)
+                          _buildFloatingPaletteEditor(
+                            Size(
+                              constraints.maxWidth,
+                              constraints.maxHeight,
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                );
+              },
+            ),
           ),
         ),
       ),
@@ -1304,7 +1475,7 @@ class _EditorScreenState extends State<EditorScreen> {
         final color = state.paletteColors[index];
         final selected = state.selectedColor.toARGB32() == color.toARGB32();
         return InkWell(
-          onTap: () => _controller.selectColorAndActivatePaint(color),
+          onTap: () => _handlePaletteColorTap(color),
           onDoubleTap: () =>
               _handleEditPaletteColor(index: index, initialColor: color),
           borderRadius: BorderRadius.circular(8),
