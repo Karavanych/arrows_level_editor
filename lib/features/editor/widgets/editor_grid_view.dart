@@ -17,6 +17,7 @@ class EditorGridView extends StatefulWidget {
     required this.onColorPick,
     this.isLineModeEnabled = false,
     this.highlightedErrorCells = const {},
+    this.highlightedErrorColor = Colors.redAccent,
   });
 
   final EditorState state;
@@ -30,6 +31,7 @@ class EditorGridView extends StatefulWidget {
   final ValueChanged<Color> onColorPick;
   final bool isLineModeEnabled;
   final Set<int> highlightedErrorCells;
+  final Color highlightedErrorColor;
 
   @override
   State<EditorGridView> createState() => _EditorGridViewState();
@@ -96,6 +98,7 @@ class _EditorGridViewState extends State<EditorGridView> {
                     scale: _scale,
                     offset: _offset,
                     highlightedErrorCells: widget.highlightedErrorCells,
+                    highlightedErrorColor: widget.highlightedErrorColor,
                     linePreviewIndices: _currentLinePreviewIndices(),
                   ),
                 ),
@@ -629,6 +632,7 @@ class _GridPainter extends CustomPainter {
     required this.scale,
     required this.offset,
     required this.highlightedErrorCells,
+    required this.highlightedErrorColor,
     this.linePreviewIndices = const {},
   });
 
@@ -637,6 +641,7 @@ class _GridPainter extends CustomPainter {
   final double scale;
   final Offset offset;
   final Set<int> highlightedErrorCells;
+  final Color highlightedErrorColor;
   final Set<int> linePreviewIndices;
 
   @override
@@ -682,9 +687,9 @@ class _GridPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
     final errorPaint = Paint()
-      ..color = Colors.redAccent
+      ..color = highlightedErrorColor
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
+      ..strokeWidth = 5;
     final linePreviewPaint = Paint()
       ..color = Colors.indigo.withValues(alpha: 0.28)
       ..style = PaintingStyle.fill;
@@ -775,6 +780,7 @@ class _GridPainter extends CustomPainter {
         oldDelegate.scale != scale ||
         oldDelegate.offset != offset ||
         oldDelegate.highlightedErrorCells != highlightedErrorCells ||
+        oldDelegate.highlightedErrorColor != highlightedErrorColor ||
         oldDelegate.linePreviewIndices != linePreviewIndices;
   }
 }

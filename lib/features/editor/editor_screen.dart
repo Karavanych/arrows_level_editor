@@ -31,6 +31,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   final Set<int> _highlightedErrorCells = <int>{};
   bool _isBlinkOn = false;
+  Color _activeBlinkColor = Colors.redAccent;
   bool _isBusy = false;
   bool _isDraggingReferenceImages = false;
   final List<String> _referenceImagePaths = <String>[];
@@ -848,15 +849,24 @@ class _EditorScreenState extends State<EditorScreen> {
     if (cells.isEmpty || !mounted) {
       return;
     }
+    const blinkColors = <Color>[
+      Colors.redAccent,
+      Colors.blueAccent,
+      Colors.greenAccent,
+      Colors.redAccent,
+      Colors.blueAccent,
+      Colors.greenAccent,
+    ];
 
     setState(() {
       _highlightedErrorCells
         ..clear()
         ..addAll(cells);
       _isBlinkOn = true;
+      _activeBlinkColor = blinkColors.first;
     });
 
-    for (var i = 0; i < 2; i += 1) {
+    for (var i = 0; i < blinkColors.length; i += 1) {
       await Future<void>.delayed(const Duration(milliseconds: 180));
       if (!mounted) {
         return;
@@ -865,21 +875,23 @@ class _EditorScreenState extends State<EditorScreen> {
         _isBlinkOn = false;
       });
 
+      if (i == blinkColors.length - 1) {
+        break;
+      }
+
       await Future<void>.delayed(const Duration(milliseconds: 180));
       if (!mounted) {
         return;
       }
       setState(() {
         _isBlinkOn = true;
+        _activeBlinkColor = blinkColors[i + 1];
       });
     }
 
-    await Future<void>.delayed(const Duration(milliseconds: 180));
-    if (!mounted) {
-      return;
-    }
     setState(() {
       _isBlinkOn = false;
+      _activeBlinkColor = Colors.redAccent;
       _highlightedErrorCells.clear();
     });
   }
@@ -1134,6 +1146,7 @@ class _EditorScreenState extends State<EditorScreen> {
                             highlightedErrorCells: _isBlinkOn
                                 ? Set<int>.from(_highlightedErrorCells)
                                 : const <int>{},
+                            highlightedErrorColor: _activeBlinkColor,
                           ),
                         ),
                       ),
