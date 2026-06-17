@@ -38,7 +38,7 @@ class ALevelPackStorageService {
 
   Future<ALevelPackDocument> loadPack(File file) async {
     if (!await file.exists()) {
-      throw FileSystemException('Pack file does not exist', file.path);
+      throw FileSystemException('Файл пака не существует', file.path);
     }
 
     final bytes = await file.readAsBytes();
@@ -141,21 +141,25 @@ class ALevelPackStorageService {
 
   void _validateManifest(ALevelPackManifest manifest) {
     if (manifest.format != _formatId) {
-      throw FormatException('Unsupported format id: ${manifest.format}');
+      throw FormatException('Неподдерживаемый формат id: ${manifest.format}');
     }
     if (manifest.version != _formatVersion) {
-      throw FormatException('Unsupported format version: ${manifest.version}');
+      throw FormatException(
+        'Неподдерживаемая версия формата: ${manifest.version}',
+      );
     }
   }
 
   String _readRequiredStringFile(Archive archive, String path) {
     final entry = archive.findFile(path);
     if (entry == null) {
-      throw FormatException('Missing required archive entry: $path');
+      throw FormatException('В архиве отсутствует обязательная запись: $path');
     }
     final content = entry.readBytes();
     if (content == null) {
-      throw FormatException('Failed to read archive entry bytes: $path');
+      throw FormatException(
+        'Не удалось прочитать байты записи архива: $path',
+      );
     }
     return utf8.decode(content);
   }
@@ -168,20 +172,22 @@ class ALevelPackStorageService {
     final boardFile = archive.findFile(boardPath);
     final metaFile = archive.findFile(metaPath);
     if (boardFile == null) {
-      throw FormatException('Missing level board file: $boardPath');
+      throw FormatException('Отсутствует файл поля уровня: $boardPath');
     }
     if (metaFile == null) {
-      throw FormatException('Missing level meta file: $metaPath');
+      throw FormatException('Отсутствует файл метаданных уровня: $metaPath');
     }
 
     final metaBytes = metaFile.readBytes();
     if (metaBytes == null) {
-      throw FormatException('Failed to read level meta file bytes: $metaPath');
+      throw FormatException(
+        'Не удалось прочитать байты файла метаданных уровня: $metaPath',
+      );
     }
     final boardBytes = boardFile.readBytes();
     if (boardBytes == null) {
       throw FormatException(
-        'Failed to read level board file bytes: $boardPath',
+        'Не удалось прочитать байты файла поля уровня: $boardPath',
       );
     }
 
@@ -191,7 +197,7 @@ class ALevelPackStorageService {
     final boardImage = img.decodePng(boardBytes);
     if (boardImage == null) {
       throw FormatException(
-        'Failed to decode board.png for level: ${entry.id}',
+        'Не удалось декодировать board.png для уровня: ${entry.id}',
       );
     }
 
@@ -230,8 +236,8 @@ class ALevelPackStorageService {
   Uint8List _encodeBoardPng(ALevelPackLevel level) {
     if (level.boardCells.length != level.width * level.height) {
       throw StateError(
-        'Invalid board cell count for ${level.id}: '
-        '${level.boardCells.length}, expected ${level.width * level.height}.',
+        'Некорректное количество клеток поля для ${level.id}: '
+        '${level.boardCells.length}, ожидалось ${level.width * level.height}.',
       );
     }
 
@@ -245,7 +251,7 @@ class ALevelPackStorageService {
           : (cell.isEmpty ? const Color(0x00000000) : cell.color);
       if (!cell.isInactive && !cell.isEmpty && color == null) {
         throw StateError(
-          'Non-inactive cell at ($x,$y) in ${level.id} has null color.',
+          'У активной клетки ($x,$y) в ${level.id} отсутствует цвет.',
         );
       }
 

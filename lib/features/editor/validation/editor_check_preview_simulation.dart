@@ -96,7 +96,7 @@ class EditorCheckPreviewSimulationService {
           finalState: working.toState(baseState),
           startPlanState: working.toStartPlanState(baseState),
           usedOppositeStarts: usedOppositeStarts,
-          message: 'Lines block each other.',
+          message: 'Линии блокируют друг друга.',
         );
       }
 
@@ -111,7 +111,8 @@ class EditorCheckPreviewSimulationService {
           finalState: working.toState(baseState),
           startPlanState: working.toStartPlanState(baseState),
           usedOppositeStarts: usedOppositeStarts,
-          message: 'Failed to find opposite endpoints for blocked lines.',
+          message:
+              'Не удалось найти противоположные конечные точки для заблокированных линий.',
         );
       }
       usedOppositeStarts = true;

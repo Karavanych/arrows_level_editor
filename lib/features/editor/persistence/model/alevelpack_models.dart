@@ -313,5 +313,5 @@ Color _colorFromHex(String value) {
   if (normalized.length == 8) {
     return Color(int.parse(normalized, radix: 16));
   }
-  throw FormatException('Unsupported color format: $value');
+  throw FormatException('Неподдерживаемый формат цвета: $value');
 }

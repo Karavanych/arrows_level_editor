@@ -66,7 +66,7 @@ class EditorSaveValidationService {
       problems.add(
         SaveValidationProblem(
           code: SaveValidationProblemCode.emptyCells,
-          message: 'Level contains empty cells.',
+          message: 'Уровень содержит пустые клетки.',
           isBlocking: true,
           cellIndices: emptyCellIndices,
         ),
@@ -87,7 +87,7 @@ class EditorSaveValidationService {
         problems.add(
           SaveValidationProblem(
             code: SaveValidationProblemCode.singleCellColorIsland,
-            message: 'Single-cell color island is not allowed.',
+            message: 'Одноклеточный цветовой остров недопустим.',
             isBlocking: true,
             cellIndices: component.cellIndices,
             componentId: component.id,
@@ -102,7 +102,7 @@ class EditorSaveValidationService {
       problems.add(
         SaveValidationProblem(
           code: SaveValidationProblemCode.missingLineStart,
-          message: 'Color-connected line has no start marker.',
+          message: 'У цветовой связной линии нет стартовой точки.',
           isBlocking: true,
           cellIndices: component.cellIndices,
           componentId: component.id,
@@ -335,7 +335,7 @@ class EditorSaveValidationService {
     final componentIndices = List<int>.from(component.cellIndices)..sort();
     if (componentIndices.length < 2) {
       return _PathReconstructionFailure(
-        message: 'line path reconstruction failed',
+        message: 'не удалось восстановить путь линии',
         cellIndices: componentIndices,
       );
     }
@@ -347,13 +347,13 @@ class EditorSaveValidationService {
       ..sort();
     if (startCandidates.isEmpty) {
       return _PathReconstructionFailure(
-        message: 'line path reconstruction failed',
+        message: 'не удалось восстановить путь линии',
         cellIndices: componentIndices,
       );
     }
     if (startCandidates.length > 1) {
       return _PathReconstructionFailure(
-        message: 'line path reconstruction failed',
+        message: 'не удалось восстановить путь линии',
         cellIndices: componentIndices,
       );
     }
@@ -361,7 +361,7 @@ class EditorSaveValidationService {
     final startIndex = startCandidates.first;
     if (!componentIndices.contains(startIndex)) {
       return _PathReconstructionFailure(
-        message: 'line path reconstruction failed',
+        message: 'не удалось восстановить путь линии',
         cellIndices: componentIndices,
       );
     }
@@ -369,7 +369,7 @@ class EditorSaveValidationService {
     final startDirection = startCell.startDirection;
     if (startDirection == null) {
       return _PathReconstructionFailure(
-        message: 'line path reconstruction failed',
+        message: 'не удалось восстановить путь линии',
         cellIndices: componentIndices,
       );
     }
@@ -386,7 +386,7 @@ class EditorSaveValidationService {
     );
     if (expectedNeighbor == null || !inComponent[expectedNeighbor]) {
       return _PathReconstructionFailure(
-        message: 'start direction incompatible with component geometry',
+        message: 'направление старта несовместимо с геометрией компонента',
         cellIndices: componentIndices,
       );
     }
@@ -400,7 +400,7 @@ class EditorSaveValidationService {
     );
     if (reconstructed == null) {
       return _PathReconstructionFailure(
-        message: 'no valid path reconstruction for component',
+        message: 'для компонента не найден корректный путь реконструкции',
         cellIndices: componentIndices,
       );
     }

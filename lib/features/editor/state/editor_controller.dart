@@ -320,7 +320,9 @@ class EditorController extends ChangeNotifier {
       await Process.run('xdg-open', [directory.path]);
       return;
     }
-    throw UnsupportedError('Reveal is not supported on this platform.');
+    throw UnsupportedError(
+      'Открытие папки не поддерживается на этой платформе.',
+    );
   }
 
   Future<void> deleteLevelById(String levelId) async {

@@ -100,7 +100,7 @@ class _EditorScreenState extends State<EditorScreen> {
         if (!mounted) {
           return;
         }
-        _showErrorSnackBar('Failed to recreate level: $error');
+        _showErrorSnackBar('Не удалось пересоздать уровень: $error');
       } finally {
         if (mounted) {
           setState(() {
@@ -162,7 +162,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
-      _showErrorSnackBar('Failed to create level: $error');
+      _showErrorSnackBar('Не удалось создать уровень: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -191,7 +191,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
-      _showErrorSnackBar('Failed to open pack: $error');
+      _showErrorSnackBar('Не удалось открыть пак: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -220,7 +220,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
-      _showErrorSnackBar('Failed to save level: $error');
+      _showErrorSnackBar('Не удалось сохранить уровень: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -269,7 +269,7 @@ class _EditorScreenState extends State<EditorScreen> {
         return;
       }
       _controller.markCurrentLevelChecked(false);
-      _showErrorSnackBar('Failed to check level: $error');
+      _showErrorSnackBar('Не удалось выполнить проверку уровня: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -293,8 +293,8 @@ class _EditorScreenState extends State<EditorScreen> {
           return false;
         }
         final shouldFill = await _askYesCancel(
-          title: 'Empty cells found',
-          message: 'Fill all empty cells as inactive?',
+          title: 'Найдены пустые клетки',
+          message: 'Заполнить все пустые клетки как неактивные?',
         );
         if (shouldFill != true) {
           return false;
@@ -316,7 +316,7 @@ class _EditorScreenState extends State<EditorScreen> {
           return false;
         }
         _showErrorSnackBar(
-          'Check failed: single-cell color islands must be fixed manually.',
+          'Проверка не пройдена: одноклеточные цветовые острова нужно исправить вручную.',
         );
         return false;
       }
@@ -337,13 +337,13 @@ class _EditorScreenState extends State<EditorScreen> {
         );
         if (!hasAutoFix) {
           _showErrorSnackBar(
-            'Check failed: some lines have no temporary start candidate.',
+            'Проверка не пройдена: для некоторых линий нет подходящей временной стартовой точки.',
           );
           return false;
         }
         final shouldAddStarts = await _askYesCancel(
-          title: 'Missing line starts',
-          message: 'Place starts automatically for lines without starts?',
+          title: 'Отсутствуют стартовые точки линий',
+          message: 'Поставить стартовые точки автоматически для линий без старта?',
         );
         if (shouldAddStarts != true) {
           return false;
@@ -366,7 +366,7 @@ class _EditorScreenState extends State<EditorScreen> {
         return false;
       }
       _showErrorSnackBar(
-        'Check failed: ${reconstructionProblems.first.message}.',
+        'Проверка не пройдена: ${reconstructionProblems.first.message}',
       );
       return false;
     }
@@ -391,8 +391,9 @@ class _EditorScreenState extends State<EditorScreen> {
         },
         onBlocked: () async {
           final decision = await _askYesCancel(
-            title: 'Lines block each other',
-            message: 'Lines block each other. Try opposite start points?',
+            title: 'Линии блокируют друг друга',
+            message:
+                'Линии блокируют друг друга. Попробовать противоположные стартовые точки?',
           );
           return decision == true;
         },
@@ -542,7 +543,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
-      _showErrorSnackBar('Failed to reveal pack folder: $error');
+      _showErrorSnackBar('Не удалось открыть папку пака: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -566,7 +567,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
-      _showErrorSnackBar('Failed to switch level: $error');
+      _showErrorSnackBar('Не удалось переключить уровень: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -594,7 +595,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
-      _showErrorSnackBar('Failed to delete level: $error');
+      _showErrorSnackBar('Не удалось удалить уровень: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -639,7 +640,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
-      _showErrorSnackBar('Failed to reorder levels: $error');
+      _showErrorSnackBar('Не удалось изменить порядок уровней: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -670,7 +671,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
-      _showErrorSnackBar('Failed to pick images: $error');
+      _showErrorSnackBar('Не удалось выбрать изображения: $error');
       return;
     }
 
@@ -688,7 +689,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
-      _showErrorSnackBar('No supported image files were selected.');
+      _showErrorSnackBar('Не выбрано ни одного поддерживаемого файла изображения.');
       return;
     }
 
@@ -707,13 +708,13 @@ class _EditorScreenState extends State<EditorScreen> {
       return;
     }
     if (_referenceImagePaths.isEmpty) {
-      _showErrorSnackBar('Add at least one reference image first.');
+      _showErrorSnackBar('Сначала добавьте хотя бы одно референсное изображение.');
       return;
     }
     final width = int.tryParse(_widthController.text);
     final height = int.tryParse(_heightController.text);
     if (width == null || height == null || width <= 0 || height <= 0) {
-      _showErrorSnackBar('Enter a valid grid width and height first.');
+      _showErrorSnackBar('Сначала введите корректные ширину и высоту сетки.');
       return;
     }
 
@@ -747,7 +748,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
-      _showErrorSnackBar('Failed to start generation: $error');
+      _showErrorSnackBar('Не удалось запустить генерацию: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -849,7 +850,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
-      _showErrorSnackBar('Failed to update palette color: $error');
+      _showErrorSnackBar('Не удалось обновить цвет палитры: $error');
     } finally {
       if (mounted) {
         setState(() {
