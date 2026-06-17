@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
 import 'package:arrows_level_editor/features/editor/validation/editor_line_analyzer.dart';
 
@@ -5,6 +7,7 @@ enum SaveValidationProblemCode {
   emptyCells,
   singleCellColorIsland,
   missingLineStart,
+  linePathReconstructionFailed,
 }
 
 enum SaveValidationAutoFixType { fillEmptyCellsAsInactive, addTemporaryStarts }
@@ -127,6 +130,30 @@ class EditorSaveValidationService {
     }
 
     return SaveValidationResult(problems: problems, autoFixes: autoFixes);
+  }
+
+  List<SaveValidationProblem> validatePathReconstruction(EditorState state) {
+    final components = _lineAnalyzer.findColorConnectedComponents(state);
+    final problems = <SaveValidationProblem>[];
+    for (final component in components) {
+      final failure = _validateComponentPathReconstruction(
+        state: state,
+        component: component,
+      );
+      if (failure == null) {
+        continue;
+      }
+      problems.add(
+        SaveValidationProblem(
+          code: SaveValidationProblemCode.linePathReconstructionFailed,
+          message: failure.message,
+          isBlocking: true,
+          cellIndices: failure.cellIndices,
+          componentId: component.id,
+        ),
+      );
+    }
+    return problems;
   }
 
   EditorState applyAutoFix({
@@ -300,4 +327,330 @@ class EditorSaveValidationService {
     }
     return result;
   }
+
+  _PathReconstructionFailure? _validateComponentPathReconstruction({
+    required EditorState state,
+    required ColorConnectedComponent component,
+  }) {
+    final componentIndices = List<int>.from(component.cellIndices)..sort();
+    if (componentIndices.length < 2) {
+      return _PathReconstructionFailure(
+        message: 'line path reconstruction failed',
+        cellIndices: componentIndices,
+      );
+    }
+
+    final startCandidates = componentIndices.where((index) {
+      final cell = state.cells[index];
+      return cell.hasStartMarker && cell.startDirection != null;
+    }).toList()
+      ..sort();
+    if (startCandidates.isEmpty) {
+      return _PathReconstructionFailure(
+        message: 'line path reconstruction failed',
+        cellIndices: componentIndices,
+      );
+    }
+    if (startCandidates.length > 1) {
+      return _PathReconstructionFailure(
+        message: 'line path reconstruction failed',
+        cellIndices: componentIndices,
+      );
+    }
+
+    final startIndex = startCandidates.first;
+    if (!componentIndices.contains(startIndex)) {
+      return _PathReconstructionFailure(
+        message: 'line path reconstruction failed',
+        cellIndices: componentIndices,
+      );
+    }
+    final startCell = state.cells[startIndex];
+    final startDirection = startCell.startDirection;
+    if (startDirection == null) {
+      return _PathReconstructionFailure(
+        message: 'line path reconstruction failed',
+        cellIndices: componentIndices,
+      );
+    }
+
+    final inComponent = List<bool>.filled(state.cells.length, false);
+    for (final index in componentIndices) {
+      inComponent[index] = true;
+    }
+
+    final expectedNeighbor = _expectedNeighborIndex(
+      state: state,
+      startIndex: startIndex,
+      direction: startDirection,
+    );
+    if (expectedNeighbor == null || !inComponent[expectedNeighbor]) {
+      return _PathReconstructionFailure(
+        message: 'start direction incompatible with component geometry',
+        cellIndices: componentIndices,
+      );
+    }
+
+    final reconstructed = _searchPathDeterministic(
+      state: state,
+      component: componentIndices,
+      inComponent: inComponent,
+      startIndex: startIndex,
+      startNeighbor: expectedNeighbor,
+    );
+    if (reconstructed == null) {
+      return _PathReconstructionFailure(
+        message: 'no valid path reconstruction for component',
+        cellIndices: componentIndices,
+      );
+    }
+
+    return null;
+  }
+
+  List<int>? _searchPathDeterministic({
+    required EditorState state,
+    required List<int> component,
+    required List<bool> inComponent,
+    required int startIndex,
+    required int startNeighbor,
+  }) {
+    final nonStartCount = component.length - 1;
+    if (nonStartCount <= 0) {
+      return null;
+    }
+
+    final walk = List<int>.filled(nonStartCount, -1);
+    final visited = List<bool>.filled(inComponent.length, false);
+    visited[startIndex] = true;
+    visited[startNeighbor] = true;
+    walk[0] = startNeighbor;
+
+    final found = _searchPathDfs(
+      state: state,
+      inComponent: inComponent,
+      visited: visited,
+      startIndex: startIndex,
+      current: startNeighbor,
+      walk: walk,
+      depth: 1,
+      nonStartCount: nonStartCount,
+    );
+    if (!found) {
+      return null;
+    }
+
+    final path = <int>[];
+    for (var i = nonStartCount - 1; i >= 0; i -= 1) {
+      path.add(walk[i]);
+    }
+    path.add(startIndex);
+    return path;
+  }
+
+  bool _searchPathDfs({
+    required EditorState state,
+    required List<bool> inComponent,
+    required List<bool> visited,
+    required int startIndex,
+    required int current,
+    required List<int> walk,
+    required int depth,
+    required int nonStartCount,
+  }) {
+    if (depth == nonStartCount) {
+      return true;
+    }
+    if (!_isResidualConnected(
+      state: state,
+      inComponent: inComponent,
+      visited: visited,
+      startIndex: startIndex,
+      current: current,
+    )) {
+      return false;
+    }
+
+    final candidates = _collectOrderedCandidates(
+      state: state,
+      inComponent: inComponent,
+      visited: visited,
+      startIndex: startIndex,
+      current: current,
+    );
+    if (candidates.isEmpty) {
+      return false;
+    }
+
+    for (final next in candidates) {
+      visited[next] = true;
+      walk[depth] = next;
+      if (_searchPathDfs(
+        state: state,
+        inComponent: inComponent,
+        visited: visited,
+        startIndex: startIndex,
+        current: next,
+        walk: walk,
+        depth: depth + 1,
+        nonStartCount: nonStartCount,
+      )) {
+        return true;
+      }
+      visited[next] = false;
+    }
+    return false;
+  }
+
+  List<int> _collectOrderedCandidates({
+    required EditorState state,
+    required List<bool> inComponent,
+    required List<bool> visited,
+    required int startIndex,
+    required int current,
+  }) {
+    final candidates = <int>[];
+    for (final neighbor in _neighbors4(state: state, index: current)) {
+      if (!inComponent[neighbor] || visited[neighbor] || neighbor == startIndex) {
+        continue;
+      }
+      candidates.add(neighbor);
+    }
+    candidates.sort((a, b) {
+      final degreeA = _countResidualDegree(
+        state: state,
+        inComponent: inComponent,
+        visited: visited,
+        startIndex: startIndex,
+        node: a,
+      );
+      final degreeB = _countResidualDegree(
+        state: state,
+        inComponent: inComponent,
+        visited: visited,
+        startIndex: startIndex,
+        node: b,
+      );
+      if (degreeA != degreeB) {
+        return degreeA.compareTo(degreeB);
+      }
+      return a.compareTo(b);
+    });
+    return candidates;
+  }
+
+  bool _isResidualConnected({
+    required EditorState state,
+    required List<bool> inComponent,
+    required List<bool> visited,
+    required int startIndex,
+    required int current,
+  }) {
+    final seen = List<bool>.filled(inComponent.length, false);
+    final queue = Queue<int>()..add(current);
+    seen[current] = true;
+    var reachable = 0;
+
+    while (queue.isNotEmpty) {
+      final node = queue.removeFirst();
+      reachable += 1;
+      for (final neighbor in _neighbors4(state: state, index: node)) {
+        if (!inComponent[neighbor] ||
+            neighbor == startIndex ||
+            seen[neighbor]) {
+          continue;
+        }
+        if (visited[neighbor] && neighbor != current) {
+          continue;
+        }
+        seen[neighbor] = true;
+        queue.add(neighbor);
+      }
+    }
+
+    var residual = 0;
+    for (var i = 0; i < inComponent.length; i += 1) {
+      if (!inComponent[i] || i == startIndex) {
+        continue;
+      }
+      if (!visited[i] || i == current) {
+        residual += 1;
+      }
+    }
+    return reachable == residual;
+  }
+
+  int _countResidualDegree({
+    required EditorState state,
+    required List<bool> inComponent,
+    required List<bool> visited,
+    required int startIndex,
+    required int node,
+  }) {
+    var degree = 0;
+    for (final neighbor in _neighbors4(state: state, index: node)) {
+      if (!inComponent[neighbor] || neighbor == startIndex) {
+        continue;
+      }
+      if (!visited[neighbor]) {
+        degree += 1;
+      }
+    }
+    return degree;
+  }
+
+  int? _expectedNeighborIndex({
+    required EditorState state,
+    required int startIndex,
+    required StartDirection direction,
+  }) {
+    final width = state.gridSize.width;
+    final height = state.gridSize.height;
+    final x = startIndex % width;
+    final y = startIndex ~/ width;
+    final (dx, dy) = switch (direction) {
+      StartDirection.left => (1, 0),
+      StartDirection.right => (-1, 0),
+      StartDirection.up => (0, 1),
+      StartDirection.down => (0, -1),
+    };
+    final nx = x + dx;
+    final ny = y + dy;
+    if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+      return null;
+    }
+    return ny * width + nx;
+  }
+
+  Iterable<int> _neighbors4({
+    required EditorState state,
+    required int index,
+  }) sync* {
+    final width = state.gridSize.width;
+    final height = state.gridSize.height;
+    final x = index % width;
+    final y = index ~/ width;
+    if (x > 0) {
+      yield index - 1;
+    }
+    if (x < width - 1) {
+      yield index + 1;
+    }
+    if (y > 0) {
+      yield index - width;
+    }
+    if (y < height - 1) {
+      yield index + width;
+    }
+  }
+}
+
+class _PathReconstructionFailure {
+  const _PathReconstructionFailure({
+    required this.message,
+    required this.cellIndices,
+  });
+
+  final String message;
+  final List<int> cellIndices;
 }

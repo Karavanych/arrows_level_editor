@@ -208,6 +208,10 @@ class EditorController extends ChangeNotifier {
     return result;
   }
 
+  List<SaveValidationProblem> validateCurrentLevelPathReconstruction() {
+    return _saveValidationService.validatePathReconstruction(_state);
+  }
+
   SaveValidationResult applyAutoFixAndRevalidate(
     SaveValidationAutoFixType autoFixType,
   ) {

@@ -305,6 +305,22 @@ class _EditorScreenState extends State<EditorScreen> {
         continue;
       }
 
+      final singleIslands = validation.problems.where(
+        (problem) =>
+            problem.code == SaveValidationProblemCode.singleCellColorIsland,
+      );
+      if (singleIslands.isNotEmpty) {
+        final cells = singleIslands.expand((it) => it.cellIndices).toSet();
+        await _blinkProblemCells(cells);
+        if (!mounted) {
+          return false;
+        }
+        _showErrorSnackBar(
+          'Check failed: single-cell color islands must be fixed manually.',
+        );
+        return false;
+      }
+
       final missingStartProblems = validation.problems.where(
         (problem) => problem.code == SaveValidationProblemCode.missingLineStart,
       );
@@ -338,22 +354,20 @@ class _EditorScreenState extends State<EditorScreen> {
         continue;
       }
 
-      final singleIslands = validation.problems.where(
-        (problem) =>
-            problem.code == SaveValidationProblemCode.singleCellColorIsland,
-      );
-      if (singleIslands.isNotEmpty) {
-        final cells = singleIslands.expand((it) => it.cellIndices).toSet();
-        await _blinkProblemCells(cells);
-        if (!mounted) {
-          return false;
-        }
-        _showErrorSnackBar(
-          'Check failed: single-cell color islands must be fixed manually.',
-        );
+      return false;
+    }
+
+    final reconstructionProblems =
+        _controller.validateCurrentLevelPathReconstruction();
+    if (reconstructionProblems.isNotEmpty) {
+      final cells = reconstructionProblems.expand((it) => it.cellIndices).toSet();
+      await _blinkProblemCells(cells);
+      if (!mounted) {
         return false;
       }
-
+      _showErrorSnackBar(
+        'Check failed: ${reconstructionProblems.first.message}.',
+      );
       return false;
     }
 
