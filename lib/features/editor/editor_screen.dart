@@ -34,6 +34,7 @@ class _EditorScreenState extends State<EditorScreen> {
   Color _activeBlinkColor = Colors.redAccent;
   bool _isBusy = false;
   bool _isDraggingReferenceImages = false;
+  bool _isDraggingPackFile = false;
   final List<String> _referenceImagePaths = <String>[];
   int? _editingPaletteIndex;
   Color? _paletteEditorColor;
@@ -184,13 +185,17 @@ class _EditorScreenState extends State<EditorScreen> {
       _isBusy = true;
     });
     try {
-      await _controller.loadLevelFromDefaultPack();
-      if (!mounted) {
+      final result = await FilePicker.pickFiles(
+        dialogTitle: 'Open .alevelpack',
+        type: FileType.custom,
+        allowedExtensions: const ['alevelpack'],
+        allowMultiple: false,
+      );
+      final selectedPath = result?.files.single.path;
+      if (selectedPath == null) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Pack opened.')));
+      await _openPackFromPath(selectedPath);
     } catch (error) {
       if (!mounted) {
         return;
@@ -204,6 +209,54 @@ class _EditorScreenState extends State<EditorScreen> {
       }
     }
   }
+
+  Future<void> _openPackFromPath(String path) async {
+    await _controller.openPackFile(path);
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Pack opened.')));
+  }
+
+  Future<void> _handlePackFileDrop(List<dynamic> files) async {
+    if (_isBusy) {
+      return;
+    }
+
+    final droppedPath = files
+        .map((file) => file.path as String?)
+        .whereType<String>()
+        .where((path) => path.isNotEmpty)
+        .firstWhere(_isPackFilePath, orElse: () => '');
+
+    if (droppedPath.isEmpty) {
+      _showErrorSnackBar('Drop a valid .alevelpack file.');
+      return;
+    }
+
+    setState(() {
+      _isBusy = true;
+    });
+    try {
+      await _openPackFromPath(droppedPath);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to open dropped pack: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+          _isDraggingPackFile = false;
+        });
+      }
+    }
+  }
+
+  bool _isPackFilePath(String path) => path.toLowerCase().endsWith('.alevelpack');
 
   Future<void> _handleSave() async {
     if (_isBusy) {
@@ -1670,6 +1723,47 @@ class _EditorScreenState extends State<EditorScreen> {
           style: Theme.of(
             context,
           ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        Tooltip(
+          message: _controller.activePackFilePath ?? '',
+          child: Text(
+            'Pack: ${_controller.activePackFileName ?? 'main.alevelpack'}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        const SizedBox(height: 8),
+        DropTarget(
+          onDragEntered: (_) {
+            setState(() {
+              _isDraggingPackFile = true;
+            });
+          },
+          onDragExited: (_) {
+            setState(() {
+              _isDraggingPackFile = false;
+            });
+          },
+          onDragDone: (details) async {
+            await _handlePackFileDrop(details.files);
+          },
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: _isDraggingPackFile ? Colors.blue : Colors.black26,
+              ),
+              color: _isDraggingPackFile
+                  ? Colors.blue.withValues(alpha: 0.08)
+                  : Colors.transparent,
+            ),
+            child: const Text(
+              'Drop .alevelpack here',
+              textAlign: TextAlign.center,
+            ),
+          ),
         ),
         const SizedBox(height: 12),
         _buildRightPanelActions(),

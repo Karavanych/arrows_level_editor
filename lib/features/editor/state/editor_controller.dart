@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:arrows_level_editor/features/editor/model/editor_models.dart';
+import 'package:arrows_level_editor/features/editor/persistence/active_pack_settings_service.dart';
 import 'package:arrows_level_editor/features/editor/persistence/alevelpack_storage_service.dart';
 import 'package:arrows_level_editor/features/editor/persistence/editor_level_mapper.dart';
 import 'package:arrows_level_editor/features/editor/persistence/level_id_generator.dart';
@@ -17,6 +18,7 @@ class EditorController extends ChangeNotifier {
     EditorSaveValidationService? saveValidationService,
     EditorLevelIdGenerator? levelIdGenerator,
     PaletteSettingsService? paletteSettingsService,
+    ActivePackSettingsService? activePackSettingsService,
   }) : _state = EditorState.initial(),
        _storageService = storageService ?? ALevelPackStorageService(),
        _levelMapper = levelMapper ?? const EditorLevelMapper(),
@@ -25,6 +27,8 @@ class EditorController extends ChangeNotifier {
        _levelIdGenerator = levelIdGenerator ?? EditorLevelIdGenerator(),
        _paletteSettingsService =
            paletteSettingsService ?? PaletteSettingsService(),
+       _activePackSettingsService =
+           activePackSettingsService ?? ActivePackSettingsService(),
        _currentLevelId = (levelIdGenerator ?? EditorLevelIdGenerator())
            .generate() {
     WidgetsBinding.instance.addObserver(_lifecycleObserver);
@@ -41,6 +45,7 @@ class EditorController extends ChangeNotifier {
   final EditorSaveValidationService _saveValidationService;
   final EditorLevelIdGenerator _levelIdGenerator;
   final PaletteSettingsService _paletteSettingsService;
+  final ActivePackSettingsService _activePackSettingsService;
   final Set<int> _strokeTouchedCells = {};
   final Set<int> _eraseStrokeTouchedCells = {};
   final List<EditorStrokeChange> _undoHistory = [];
@@ -48,6 +53,7 @@ class EditorController extends ChangeNotifier {
   final Map<int, EditorCell> _strokeBeforeCells = {};
   final Set<int> _strokeChangedCells = {};
   ALevelPackDocument? _openedPack;
+  File? _activePackFile;
   String _currentLevelId;
   String? _lastOpenedLevelId;
   SaveValidationResult? _lastSaveValidationResult;
@@ -67,6 +73,8 @@ class EditorController extends ChangeNotifier {
       _lastSaveValidationResult;
   bool get isCurrentLevelDirty => _isCurrentLevelDirty;
   String? get currentPackName => _openedPack?.manifest.name;
+  String? get activePackFilePath => _activePackFile?.path;
+  String? get activePackFileName => _activePackFile?.uri.pathSegments.last;
   bool get isCurrentLevelCompletelyEmpty =>
       _state.cells.every(
         (cell) =>
@@ -109,7 +117,8 @@ class EditorController extends ChangeNotifier {
 
     final pack =
         _openedPack ??
-        await _storageService.loadOrCreateDefaultPack(
+        await _storageService.loadOrCreatePack(
+          file: await _ensureActivePackFile(),
           paletteColors: _state.paletteColors,
         );
     _openedPack = pack.ensureLevelEntry(nextLevelId);
@@ -144,7 +153,8 @@ class EditorController extends ChangeNotifier {
 
     final pack =
         _openedPack ??
-        await _storageService.loadOrCreateDefaultPack(
+        await _storageService.loadOrCreatePack(
+          file: await _ensureActivePackFile(),
           paletteColors: _state.paletteColors,
         );
     _openedPack = pack.ensureLevelEntry(_currentLevelId);
@@ -160,6 +170,7 @@ class EditorController extends ChangeNotifier {
     String? levelId,
     bool skipValidation = true,
   }) async {
+    final activeFile = await _ensureActivePackFile();
     final targetLevelId = levelId ?? _currentLevelId;
     final level = _levelMapper.toPersistedLevel(
       levelId: targetLevelId,
@@ -169,7 +180,8 @@ class EditorController extends ChangeNotifier {
 
     final existingPack =
         _openedPack ??
-        await _storageService.loadOrCreateDefaultPack(
+        await _storageService.loadOrCreatePack(
+          file: activeFile,
           paletteColors: _state.paletteColors,
         );
     final nextPack = _storageService.buildPackWithUpsertedLevel(
@@ -178,8 +190,7 @@ class EditorController extends ChangeNotifier {
       lastOpenedLevelId: targetLevelId,
     );
 
-    final file = await _storageService.getDefaultPackFile();
-    await _storageService.savePack(file: file, pack: nextPack);
+    await _storageService.savePack(file: activeFile, pack: nextPack);
     _openedPack = nextPack;
     _currentLevelId = targetLevelId;
     if (skipValidation) {
@@ -240,9 +251,13 @@ class EditorController extends ChangeNotifier {
 
   Future<void> loadLevelFromDefaultPack({String? levelId}) async {
     await _restoreCustomPaletteFromSettingsIfNeeded();
-    final pack = await _storageService.loadOrCreateDefaultPack(
+    final activeFile = await _resolveInitialActivePackFile();
+    final pack = await _storageService.loadOrCreatePack(
+      file: activeFile,
       paletteColors: _state.paletteColors,
     );
+    _activePackFile = activeFile;
+    await _activePackSettingsService.saveLastOpenedPackFilePath(activeFile.path);
     if (pack.levels.isEmpty) {
       _openedPack = pack;
       await createLevel(
@@ -303,19 +318,68 @@ class EditorController extends ChangeNotifier {
     await loadLevelFromDefaultPack(levelId: levelId);
   }
 
+  Future<void> openPackFile(String filePath) async {
+    final file = File(filePath);
+    final pack = await _storageService.loadPack(file);
+    await _restoreCustomPaletteFromSettingsIfNeeded();
+    _activePackFile = file;
+    await _activePackSettingsService.saveLastOpenedPackFilePath(file.path);
+    _openedPack = pack;
+    _restoreCheckedStatesFromPack(pack);
+
+    if (pack.levels.isEmpty) {
+      final nextLevelId = _levelIdGenerator.generate();
+      _currentLevelId = nextLevelId;
+      _isCurrentLevelDirty = true;
+      _levelDirtyStates[nextLevelId] = true;
+      _levelCheckedStates[nextLevelId] = false;
+      _state = _state.copyWith(
+        cells: List<EditorCell>.filled(
+          _state.gridSize.width * _state.gridSize.height,
+          const EditorCell(),
+        ),
+        clearSelectedCell: true,
+      );
+      _openedPack = pack.ensureLevelEntry(nextLevelId);
+      _storeCurrentLevelDraft();
+      notifyListeners();
+      return;
+    }
+
+    final targetLevelId = pack.manifest.lastOpenedLevelId;
+    ALevelPackLevel selected = pack.levels.first;
+    if (targetLevelId != null) {
+      for (final level in pack.levels) {
+        if (level.id == targetLevelId) {
+          selected = level;
+          break;
+        }
+      }
+    }
+
+    _applyLoadedState(selected);
+    _lastOpenedLevelId = selected.id;
+    _currentLevelId = selected.id;
+    _isCurrentLevelDirty = false;
+    _levelDirtyStates[_currentLevelId] = false;
+    _levelCheckedStates.putIfAbsent(_currentLevelId, () => false);
+    _storeCurrentLevelDraft();
+    notifyListeners();
+  }
+
   Future<void> revealDefaultPackFolder() async {
-    final file = await _storageService.getDefaultPackFile();
+    final file = await _ensureActivePackFile();
     final directory = Directory(file.parent.path);
     if (!await directory.exists()) {
       await directory.create(recursive: true);
     }
 
     if (Platform.isMacOS) {
-      await Process.run('open', [directory.path]);
+      await Process.run('open', ['-R', file.path]);
       return;
     }
     if (Platform.isWindows) {
-      await Process.run('explorer', [directory.path]);
+      await Process.run('explorer', ['/select,', file.path]);
       return;
     }
     if (Platform.isLinux) {
@@ -330,7 +394,8 @@ class EditorController extends ChangeNotifier {
   Future<void> deleteLevelById(String levelId) async {
     final pack =
         _openedPack ??
-        await _storageService.loadOrCreateDefaultPack(
+        await _storageService.loadOrCreatePack(
+          file: await _ensureActivePackFile(),
           paletteColors: _state.paletteColors,
         );
     final levels = pack.manifest.levels;
@@ -411,7 +476,8 @@ class EditorController extends ChangeNotifier {
   }) async {
     final pack =
         _openedPack ??
-        await _storageService.loadOrCreateDefaultPack(
+        await _storageService.loadOrCreatePack(
+          file: await _ensureActivePackFile(),
           paletteColors: _state.paletteColors,
         );
     if (pack.manifest.levels.length < 2) {
@@ -433,7 +499,8 @@ class EditorController extends ChangeNotifier {
 
     var pack =
         _openedPack ??
-        await _storageService.loadOrCreateDefaultPack(
+        await _storageService.loadOrCreatePack(
+          file: await _ensureActivePackFile(),
           paletteColors: _state.paletteColors,
         );
     for (final generatedState in generatedStates) {
@@ -1101,8 +1168,32 @@ class EditorController extends ChangeNotifier {
   }
 
   Future<void> _persistPackDocument(ALevelPackDocument pack) async {
-    final file = await _storageService.getDefaultPackFile();
+    final file = await _ensureActivePackFile();
     await _storageService.savePack(file: file, pack: pack);
+  }
+
+  Future<File> _ensureActivePackFile() async {
+    final existing = _activePackFile;
+    if (existing != null) {
+      return existing;
+    }
+    final resolved = await _resolveInitialActivePackFile();
+    _activePackFile = resolved;
+    await _activePackSettingsService.saveLastOpenedPackFilePath(resolved.path);
+    return resolved;
+  }
+
+  Future<File> _resolveInitialActivePackFile() async {
+    final rememberedPath =
+        await _activePackSettingsService.loadLastOpenedPackFilePath();
+    if (rememberedPath != null && rememberedPath.isNotEmpty) {
+      final rememberedFile = File(rememberedPath);
+      if (await rememberedFile.exists()) {
+        return rememberedFile;
+      }
+      await _activePackSettingsService.clearLastOpenedPackFilePath();
+    }
+    return _storageService.getDefaultPackFile();
   }
 
   Future<void> _restoreCustomPaletteFromSettingsIfNeeded() async {

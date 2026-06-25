@@ -30,6 +30,13 @@ class ALevelPackStorageService {
     required List<Color> paletteColors,
   }) async {
     final file = await getDefaultPackFile();
+    return loadOrCreatePack(file: file, paletteColors: paletteColors);
+  }
+
+  Future<ALevelPackDocument> loadOrCreatePack({
+    required File file,
+    required List<Color> paletteColors,
+  }) async {
     if (!await file.exists()) {
       return _emptyPackDocument(paletteColors: paletteColors);
     }
