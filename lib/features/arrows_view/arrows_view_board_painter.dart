@@ -8,10 +8,12 @@ class ArrowsViewRenderSettings {
   const ArrowsViewRenderSettings({
     required this.isColored,
     required this.thicknessScale,
+    required this.backgroundColor,
   });
 
   final bool isColored;
   final double thicknessScale;
+  final Color backgroundColor;
 }
 
 class ArrowsViewBoardPainter extends CustomPainter {
@@ -41,7 +43,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final bgPaint = Paint()..color = const Color(0xFFF3F3F3);
+    final bgPaint = Paint()..color = settings.backgroundColor;
     canvas.drawRect(Offset.zero & size, bgPaint);
     if (model.width <= 0 || model.height <= 0) {
       return;
@@ -174,7 +176,8 @@ class ArrowsViewBoardPainter extends CustomPainter {
         oldDelegate.scale != scale ||
         oldDelegate.offset != offset ||
         oldDelegate.settings.isColored != settings.isColored ||
-        oldDelegate.settings.thicknessScale != settings.thicknessScale;
+        oldDelegate.settings.thicknessScale != settings.thicknessScale ||
+        oldDelegate.settings.backgroundColor != settings.backgroundColor;
   }
 }
 

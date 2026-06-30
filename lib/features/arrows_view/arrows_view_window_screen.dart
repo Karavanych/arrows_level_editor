@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_board_painter.dart';
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_board_widget.dart';
@@ -26,6 +27,8 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
   String? _runtimeError;
   bool _isColoredMode = true;
   double _thicknessScale = _defaultThicknessScale;
+  Color _backgroundColor = Colors.transparent;
+  bool _isBackgroundColorDialogOpen = false;
 
   double _clampThicknessScale(double value) {
     return value.clamp(_minThicknessScale, _maxThicknessScale).toDouble();
@@ -67,6 +70,57 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
     }
   }
 
+  Future<void> _openBackgroundColorEditor() async {
+    if (_isBackgroundColorDialogOpen) {
+      return;
+    }
+    _isBackgroundColorDialogOpen = true;
+    var tempColor = _backgroundColor;
+    final selected = await showDialog<Color>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Background color'),
+          content: StatefulBuilder(
+            builder: (context, setDialogState) {
+              return SizedBox(
+                width: 360,
+                child: ColorPicker(
+                  pickerColor: tempColor,
+                  onColorChanged: (nextColor) {
+                    setDialogState(() {
+                      tempColor = nextColor;
+                    });
+                  },
+                  enableAlpha: true,
+                  displayThumbColor: true,
+                  portraitOnly: true,
+                ),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(tempColor),
+              child: const Text('Apply'),
+            ),
+          ],
+        );
+      },
+    );
+    _isBackgroundColorDialogOpen = false;
+    if (!mounted || selected == null) {
+      return;
+    }
+    setState(() {
+      _backgroundColor = selected;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final runtimeModel = _runtimeModel;
@@ -90,6 +144,9 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
                 _thicknessScale = _clampThicknessScale(value);
               });
             },
+            backgroundColor: _backgroundColor,
+            onBackgroundColorTap: _openBackgroundColorEditor,
+            onBackgroundColorDoubleTap: _openBackgroundColorEditor,
           ),
           Expanded(
             child: Padding(
@@ -103,6 +160,7 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
                       renderSettings: ArrowsViewRenderSettings(
                         isColored: _isColoredMode,
                         thicknessScale: _clampThicknessScale(_thicknessScale),
+                        backgroundColor: _backgroundColor,
                       ),
                     ),
             ),
@@ -121,6 +179,9 @@ class _ArrowsViewControlStrip extends StatelessWidget {
     required this.maxThicknessScale,
     required this.onColoredModeChanged,
     required this.onThicknessScaleChanged,
+    required this.backgroundColor,
+    required this.onBackgroundColorTap,
+    required this.onBackgroundColorDoubleTap,
   });
 
   final bool isColoredMode;
@@ -129,6 +190,9 @@ class _ArrowsViewControlStrip extends StatelessWidget {
   final double maxThicknessScale;
   final ValueChanged<bool> onColoredModeChanged;
   final ValueChanged<double> onThicknessScaleChanged;
+  final Color backgroundColor;
+  final VoidCallback onBackgroundColorTap;
+  final VoidCallback onBackgroundColorDoubleTap;
 
   @override
   Widget build(BuildContext context) {
@@ -161,11 +225,80 @@ class _ArrowsViewControlStrip extends StatelessWidget {
               onChanged: onThicknessScaleChanged,
             ),
           ),
+          const SizedBox(width: 8),
+          _BackgroundColorSwatch(
+            color: backgroundColor,
+            onTap: onBackgroundColorTap,
+            onDoubleTap: onBackgroundColorDoubleTap,
+          ),
           const Spacer(),
         ],
       ),
     );
   }
+}
+
+class _BackgroundColorSwatch extends StatelessWidget {
+  const _BackgroundColorSwatch({
+    required this.color,
+    required this.onTap,
+    required this.onDoubleTap,
+  });
+
+  final Color color;
+  final VoidCallback onTap;
+  final VoidCallback onDoubleTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      onDoubleTap: onDoubleTap,
+      child: Tooltip(
+        message: 'Click to edit background color',
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.black26),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  const CustomPaint(painter: _TransparencyGridPainter()),
+                  ColoredBox(color: color),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TransparencyGridPainter extends CustomPainter {
+  const _TransparencyGridPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const cell = 6.0;
+    final light = Paint()..color = const Color(0xFFE9E9E9);
+    final dark = Paint()..color = const Color(0xFFD1D1D1);
+    for (double y = 0; y < size.height; y += cell) {
+      for (double x = 0; x < size.width; x += cell) {
+        final isDark = ((x / cell).floor() + (y / cell).floor()).isEven;
+        canvas.drawRect(Rect.fromLTWH(x, y, cell, cell), isDark ? dark : light);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _ArrowsViewErrorPanel extends StatelessWidget {
