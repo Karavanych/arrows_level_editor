@@ -160,17 +160,16 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
       final imageSize = Size(width.toDouble(), height.toDouble());
-      final painter = ArrowsViewBoardPainter(
+      ArrowsViewBoardPainter.paintForExport(
+        canvas: canvas,
+        size: imageSize,
         model: runtimeModel,
-        scale: 1,
-        offset: Offset.zero,
         settings: ArrowsViewRenderSettings(
           isColored: _isColoredMode,
           thicknessScale: _clampThicknessScale(_thicknessScale),
           backgroundColor: _backgroundColor,
         ),
       );
-      painter.paint(canvas, imageSize);
       final picture = recorder.endRecording();
       final image = await picture.toImage(width, height);
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);

@@ -35,6 +35,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
   static const double _inactiveCellScale = 0.9;
   static const bool _showInactiveCells = false;
   static const bool _showSupportPoints = false;
+  static const double _exportPadding = 24;
 
   final ArrowsViewRuntimeModel model;
   final double scale;
@@ -66,6 +67,56 @@ class ArrowsViewBoardPainter extends CustomPainter {
     if (_showSupportPoints) {
       _paintSupportPoints(canvas, layout);
     }
+    canvas.restore();
+  }
+
+  static void paintForExport({
+    required Canvas canvas,
+    required Size size,
+    required ArrowsViewRuntimeModel model,
+    required ArrowsViewRenderSettings settings,
+  }) {
+    final painter = ArrowsViewBoardPainter(
+      model: model,
+      scale: 1,
+      offset: Offset.zero,
+      settings: settings,
+    );
+    final bgPaint = Paint()..color = settings.backgroundColor;
+    canvas.drawRect(Offset.zero & size, bgPaint);
+    if (model.width <= 0 || model.height <= 0 || model.paths.isEmpty) {
+      return;
+    }
+
+    final innerRect = Rect.fromLTWH(
+      _exportPadding,
+      _exportPadding,
+      math.max(1, size.width - _exportPadding * 2),
+      math.max(1, size.height - _exportPadding * 2),
+    );
+    final layout = ArrowsViewBoardLayout.exportCanonical(
+      width: model.width,
+      height: model.height,
+    );
+    final bounds = painter._computeArtworkBounds(layout);
+    if (bounds == null || bounds.width <= 0 || bounds.height <= 0) {
+      return;
+    }
+
+    final fitScale = math.min(
+      innerRect.width / bounds.width,
+      innerRect.height / bounds.height,
+    );
+    final targetCenter = innerRect.center;
+    final sourceCenter = bounds.center;
+    final dx = targetCenter.dx - sourceCenter.dx * fitScale;
+    final dy = targetCenter.dy - sourceCenter.dy * fitScale;
+
+    canvas
+      ..save()
+      ..translate(dx, dy)
+      ..scale(fitScale);
+    painter._paintPaths(canvas, layout);
     canvas.restore();
   }
 
@@ -179,6 +230,59 @@ class ArrowsViewBoardPainter extends CustomPainter {
         oldDelegate.settings.thicknessScale != settings.thicknessScale ||
         oldDelegate.settings.backgroundColor != settings.backgroundColor;
   }
+
+  Rect? _computeArtworkBounds(ArrowsViewBoardLayout layout) {
+    final strokeWidth =
+        _scaled(_baseLineWidth, layout) * settings.thicknessScale;
+    final arrowLength =
+        _scaled(_baseArrowLength, layout) * settings.thicknessScale;
+    final arrowHalfWidth =
+        _scaled(_baseArrowHalfWidth, layout) * settings.thicknessScale;
+    final arrowTipForwardOffset =
+        _scaled(_baseArrowTipForwardOffset, layout) * settings.thicknessScale;
+    final halfStroke = strokeWidth * 0.5;
+
+    Rect? bounds;
+    for (final path in model.paths) {
+      if (path.points.length < 2) {
+        continue;
+      }
+      for (var i = 1; i < path.points.length; i += 1) {
+        final start = layout.pointToCanvas(
+          path.points[i - 1].dx,
+          path.points[i - 1].dy,
+        );
+        final end = layout.pointToCanvas(path.points[i].dx, path.points[i].dy);
+        final segmentRect = Rect.fromLTRB(
+          math.min(start.dx, end.dx) - halfStroke,
+          math.min(start.dy, end.dy) - halfStroke,
+          math.max(start.dx, end.dx) + halfStroke,
+          math.max(start.dy, end.dy) + halfStroke,
+        );
+        bounds = bounds == null
+            ? segmentRect
+            : bounds.expandToInclude(segmentRect);
+      }
+
+      final headCenter = layout.pointToCanvas(
+        path.headPose.position.dx,
+        path.headPose.position.dy,
+      );
+      final direction = _normalize(path.headPose.direction);
+      final tip = headCenter + direction * arrowTipForwardOffset;
+      final baseCenter = tip - direction * arrowLength;
+      final perpendicular = Offset(-direction.dy, direction.dx);
+      final left = baseCenter + perpendicular * arrowHalfWidth;
+      final right = baseCenter - perpendicular * arrowHalfWidth;
+      var headBounds = Rect.fromPoints(
+        tip,
+        left,
+      ).expandToInclude(Rect.fromPoints(tip, right));
+      headBounds = headBounds.inflate(halfStroke * 0.2);
+      bounds = bounds == null ? headBounds : bounds.expandToInclude(headBounds);
+    }
+    return bounds;
+  }
 }
 
 class ArrowsViewBoardLayout {
@@ -238,6 +342,21 @@ class ArrowsViewBoardLayout {
     return Offset(
       origin.dx + gridX * pointSpacing,
       origin.dy + gridY * pointSpacing,
+    );
+  }
+
+  factory ArrowsViewBoardLayout.exportCanonical({
+    required int width,
+    required int height,
+  }) {
+    final pointSpacing = ArrowsViewBoardPainter._maxPointSpacing;
+    final boardWidth = math.max(0, width - 1).toDouble() * pointSpacing;
+    final boardHeight = math.max(0, height - 1).toDouble() * pointSpacing;
+    final origin = Offset(-boardWidth * 0.5, -boardHeight * 0.5);
+    return ArrowsViewBoardLayout(
+      origin: origin,
+      pointSpacing: pointSpacing,
+      boardBounds: Rect.fromLTWH(origin.dx, origin.dy, boardWidth, boardHeight),
     );
   }
 }
