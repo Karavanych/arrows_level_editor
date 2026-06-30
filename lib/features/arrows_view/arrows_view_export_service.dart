@@ -69,4 +69,21 @@ class ArrowsViewExportService {
     }
     throw UnsupportedError('Reveal is not supported on this platform.');
   }
+
+  Future<void> revealExportDirectory() async {
+    final directory = await getDefaultExportDirectory();
+    if (Platform.isMacOS) {
+      await Process.run('open', [directory.path]);
+      return;
+    }
+    if (Platform.isWindows) {
+      await Process.run('explorer', [directory.path]);
+      return;
+    }
+    if (Platform.isLinux) {
+      await Process.run('xdg-open', [directory.path]);
+      return;
+    }
+    throw UnsupportedError('Reveal is not supported on this platform.');
+  }
 }

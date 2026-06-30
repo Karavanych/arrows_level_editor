@@ -53,6 +53,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
   static const bool _showInactiveCells = false;
   static const bool _showSupportPoints = false;
   static const double _exportPadding = 24;
+  static const double _successExitExtraDistanceFactor = 2.8;
 
   final ArrowsViewRuntimeModel model;
   final double scale;
@@ -367,7 +368,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
         arrowLength +
         arrowTipForwardOffset +
         strokeWidth +
-        _maxPointSpacing * 1.2;
+        _maxPointSpacing * _successExitExtraDistanceFactor;
   }
 
   double _polylineLength(List<Offset> polyline) {

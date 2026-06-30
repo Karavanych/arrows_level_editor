@@ -44,7 +44,7 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
   bool _videoStopRequested = false;
   bool _isAnimating = false;
   final TextEditingController _flightSpeedController = TextEditingController(
-    text: '1.0',
+    text: '2',
   );
   final TextEditingController _animationIntervalController =
       TextEditingController(text: '0.25');
@@ -53,7 +53,7 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
   final Map<int, Duration> _launchedAt = <int, Duration>{};
   Set<int> _pendingPathIndices = <int>{};
   int _animationRunId = 0;
-  static const Duration _flightDuration = Duration(milliseconds: 1300);
+  static const Duration _flightDuration = Duration(milliseconds: 2800);
   static const int _videoFps = 30;
   final TextEditingController _exportWidthController = TextEditingController(
     text: '1024',
@@ -396,6 +396,17 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
     }
   }
 
+  Future<void> _openVideoExportFolder() async {
+    try {
+      await _exportService.revealExportDirectory();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to open video export folder: $error');
+    }
+  }
+
   Future<void> _captureVideoFrame({
     required ArrowsViewRuntimeModel runtimeModel,
     required int width,
@@ -597,7 +608,7 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
   double _readFlightSpeed() {
     final raw = double.tryParse(_flightSpeedController.text);
     if (raw == null || raw <= 0) {
-      return 1.0;
+      return 2.0;
     }
     return raw;
   }
@@ -703,6 +714,7 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
             onSaveVideoPressed: (_isExportingVideo || _isAnimating)
                 ? null
                 : _exportVideo,
+            onOpenVideosPressed: _openVideoExportFolder,
             onStopVideoPressed: _isExportingVideo
                 ? () {
                     _videoStopRequested = true;
@@ -762,6 +774,7 @@ class _ArrowsViewControlStrip extends StatelessWidget {
     required this.onAnimatePressed,
     required this.onStopPressed,
     required this.onSaveVideoPressed,
+    required this.onOpenVideosPressed,
     required this.onStopVideoPressed,
     required this.exportWidthController,
     required this.exportHeightController,
@@ -784,6 +797,7 @@ class _ArrowsViewControlStrip extends StatelessWidget {
   final VoidCallback onAnimatePressed;
   final VoidCallback onStopPressed;
   final VoidCallback? onSaveVideoPressed;
+  final VoidCallback? onOpenVideosPressed;
   final VoidCallback? onStopVideoPressed;
   final TextEditingController exportWidthController;
   final TextEditingController exportHeightController;
@@ -834,6 +848,11 @@ class _ArrowsViewControlStrip extends StatelessWidget {
                   ? onStopVideoPressed
                   : onSaveVideoPressed,
               child: Text(isRecordingVideo ? 'Stop' : 'Save Video'),
+            ),
+            const SizedBox(width: 6),
+            OutlinedButton(
+              onPressed: onOpenVideosPressed,
+              child: const Text('Open Videos'),
             ),
             const SizedBox(width: 8),
             _AnimationValueField(
