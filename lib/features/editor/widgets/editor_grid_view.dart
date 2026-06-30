@@ -135,7 +135,9 @@ class _EditorGridViewState extends State<EditorGridView> {
   void _handlePointerDown(PointerDownEvent event) {
     widget.onEditorInteractionStart();
 
-    if (_isPanModifierPressed() && _hasMousePaintOrEraseButton(event.buttons)) {
+    if (_hasMiddleButton(event.buttons) ||
+        (_isPanModifierPressed() &&
+            _hasMousePaintOrEraseButton(event.buttons))) {
       _endPaintStrokeIfNeeded();
       _endEraseStrokeIfNeeded();
       _isModifiedPanStroke = true;
@@ -176,7 +178,7 @@ class _EditorGridViewState extends State<EditorGridView> {
 
   void _handlePointerMove(PointerMoveEvent event) {
     if (_isModifiedPanStroke && event.pointer == _panPointerId) {
-      if (!_hasMousePaintOrEraseButton(event.buttons)) {
+      if (!_hasPanHoldButton(event.buttons)) {
         _endModifiedPanIfNeeded();
         return;
       }
@@ -226,7 +228,9 @@ class _EditorGridViewState extends State<EditorGridView> {
 
     if (event.pointer != _erasePointerId) {
       if (event.pointer == _primaryPointerId) {
-        if (widget.isLineModeEnabled && _isPaintingStroke && _lineStartIndex != null) {
+        if (widget.isLineModeEnabled &&
+            _isPaintingStroke &&
+            _lineStartIndex != null) {
           final upIndex = _indexFromViewportPosition(event.localPosition);
           if (upIndex != null) {
             _lineEndIndex = upIndex;
@@ -270,8 +274,11 @@ class _EditorGridViewState extends State<EditorGridView> {
 
   bool _hasSecondaryButton(int buttons) => buttons & kSecondaryMouseButton != 0;
   bool _hasPrimaryButton(int buttons) => buttons & kPrimaryMouseButton != 0;
+  bool _hasMiddleButton(int buttons) => buttons & kMiddleMouseButton != 0;
   bool _hasMousePaintOrEraseButton(int buttons) =>
       _hasPrimaryButton(buttons) || _hasSecondaryButton(buttons);
+  bool _hasPanHoldButton(int buttons) =>
+      _hasMousePaintOrEraseButton(buttons) || _hasMiddleButton(buttons);
 
   bool _isPanModifierPressed() {
     final pressed = HardwareKeyboard.instance.logicalKeysPressed;
@@ -400,7 +407,9 @@ class _EditorGridViewState extends State<EditorGridView> {
     if (_isPendingColorPick) {
       return;
     }
-    if (widget.isLineModeEnabled && _isPaintingStroke && _lineStartIndex != null) {
+    if (widget.isLineModeEnabled &&
+        _isPaintingStroke &&
+        _lineStartIndex != null) {
       _applyLineStrokeIfNeeded();
     }
     _endPaintStrokeIfNeeded();
@@ -597,7 +606,7 @@ class _EditorGridViewState extends State<EditorGridView> {
     if (horizontal) {
       final targetX = endX;
       final step = targetX >= startX ? 1 : -1;
-      for (var x = startX;; x += step) {
+      for (var x = startX; ; x += step) {
         result.add(startY * width + x);
         if (x == targetX) {
           break;
@@ -608,7 +617,7 @@ class _EditorGridViewState extends State<EditorGridView> {
 
     final targetY = endY;
     final step = targetY >= startY ? 1 : -1;
-    for (var y = startY;; y += step) {
+    for (var y = startY; ; y += step) {
       result.add(y * width + startX);
       if (y == targetY) {
         break;

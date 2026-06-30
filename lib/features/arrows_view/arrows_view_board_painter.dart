@@ -19,6 +19,8 @@ class ArrowsViewBoardPainter extends CustomPainter {
   static const double _baseArrowLength = _baseLineWidth * 2.4;
   static const double _baseArrowHalfWidth = _baseLineWidth * 1.1;
   static const double _inactiveCellScale = 0.9;
+  static const bool _showInactiveCells = false;
+  static const bool _showSupportPoints = false;
 
   final ArrowsViewRuntimeModel model;
   final double scale;
@@ -42,9 +44,13 @@ class ArrowsViewBoardPainter extends CustomPainter {
       ..save()
       ..translate(offset.dx, offset.dy)
       ..scale(scale);
-    _paintInactiveCells(canvas, layout);
+    if (_showInactiveCells) {
+      _paintInactiveCells(canvas, layout);
+    }
     _paintPaths(canvas, layout);
-    _paintSupportPoints(canvas, layout);
+    if (_showSupportPoints) {
+      _paintSupportPoints(canvas, layout);
+    }
     canvas.restore();
   }
 

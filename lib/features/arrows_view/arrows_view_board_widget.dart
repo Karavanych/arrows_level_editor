@@ -132,7 +132,9 @@ class _ArrowsViewBoardWidgetState extends State<ArrowsViewBoardWidget> {
   }
 
   void _handlePointerDown(PointerDownEvent event) {
-    if (_isPanModifierPressed() && _hasMousePaintOrEraseButton(event.buttons)) {
+    if (_hasMiddleButton(event.buttons) ||
+        (_isPanModifierPressed() &&
+            _hasMousePaintOrEraseButton(event.buttons))) {
       _isModifiedPanStroke = true;
       _panPointerId = event.pointer;
       _panLastViewportPosition = event.localPosition;
@@ -143,7 +145,7 @@ class _ArrowsViewBoardWidgetState extends State<ArrowsViewBoardWidget> {
     if (!_isModifiedPanStroke || event.pointer != _panPointerId) {
       return;
     }
-    if (!_hasMousePaintOrEraseButton(event.buttons)) {
+    if (!_hasPanHoldButton(event.buttons)) {
       _endModifiedPanIfNeeded();
       return;
     }
@@ -179,8 +181,11 @@ class _ArrowsViewBoardWidgetState extends State<ArrowsViewBoardWidget> {
 
   bool _hasSecondaryButton(int buttons) => buttons & kSecondaryMouseButton != 0;
   bool _hasPrimaryButton(int buttons) => buttons & kPrimaryMouseButton != 0;
+  bool _hasMiddleButton(int buttons) => buttons & kMiddleMouseButton != 0;
   bool _hasMousePaintOrEraseButton(int buttons) =>
       _hasPrimaryButton(buttons) || _hasSecondaryButton(buttons);
+  bool _hasPanHoldButton(int buttons) =>
+      _hasMousePaintOrEraseButton(buttons) || _hasMiddleButton(buttons);
 
   bool _isPanModifierPressed() {
     final pressed = HardwareKeyboard.instance.logicalKeysPressed;
