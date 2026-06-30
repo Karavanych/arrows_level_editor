@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:arrows_level_editor/features/arrows_view/arrows_view_board_painter.dart';
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_board_widget.dart';
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_level_snapshot.dart';
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_path_reconstructor.dart';
@@ -16,9 +17,19 @@ class ArrowsViewWindowScreen extends StatefulWidget {
 }
 
 class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
+  static const double _minThicknessScale = 0.6;
+  static const double _maxThicknessScale = 1.8;
+  static const double _defaultThicknessScale = 1.0;
+
   ArrowsViewWindowStateManager? _windowStateManager;
   ArrowsViewRuntimeModel? _runtimeModel;
   String? _runtimeError;
+  bool _isColoredMode = true;
+  double _thicknessScale = _defaultThicknessScale;
+
+  double _clampThicknessScale(double value) {
+    return value.clamp(_minThicknessScale, _maxThicknessScale).toDouble();
+  }
 
   @override
   void initState() {
@@ -64,7 +75,22 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _ArrowsViewHeader(snapshot: widget.snapshot),
+          _ArrowsViewControlStrip(
+            isColoredMode: _isColoredMode,
+            thicknessScale: _thicknessScale,
+            minThicknessScale: _minThicknessScale,
+            maxThicknessScale: _maxThicknessScale,
+            onColoredModeChanged: (value) {
+              setState(() {
+                _isColoredMode = value;
+              });
+            },
+            onThicknessScaleChanged: (value) {
+              setState(() {
+                _thicknessScale = _clampThicknessScale(value);
+              });
+            },
+          ),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -72,7 +98,13 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
                   ? _ArrowsViewErrorPanel(
                       message: _runtimeError ?? 'Unknown error.',
                     )
-                  : ArrowsViewBoardWidget(model: runtimeModel),
+                  : ArrowsViewBoardWidget(
+                      model: runtimeModel,
+                      renderSettings: ArrowsViewRenderSettings(
+                        isColored: _isColoredMode,
+                        thicknessScale: _clampThicknessScale(_thicknessScale),
+                      ),
+                    ),
             ),
           ),
         ],
@@ -81,25 +113,54 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
   }
 }
 
-class _ArrowsViewHeader extends StatelessWidget {
-  const _ArrowsViewHeader({required this.snapshot});
+class _ArrowsViewControlStrip extends StatelessWidget {
+  const _ArrowsViewControlStrip({
+    required this.isColoredMode,
+    required this.thicknessScale,
+    required this.minThicknessScale,
+    required this.maxThicknessScale,
+    required this.onColoredModeChanged,
+    required this.onThicknessScaleChanged,
+  });
 
-  final ArrowsViewLevelSnapshot snapshot;
+  final bool isColoredMode;
+  final double thicknessScale;
+  final double minThicknessScale;
+  final double maxThicknessScale;
+  final ValueChanged<bool> onColoredModeChanged;
+  final ValueChanged<double> onThicknessScaleChanged;
 
   @override
   Widget build(BuildContext context) {
+    final sliderValue = thicknessScale
+        .clamp(minThicknessScale, maxThicknessScale)
+        .toDouble();
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: Colors.black12)),
       ),
-      child: Wrap(
-        spacing: 14,
-        runSpacing: 6,
+      child: Row(
         children: [
-          Text('Level: ${snapshot.levelId}'),
-          Text('Size: ${snapshot.gridWidth} x ${snapshot.gridHeight}'),
-          Text('Starts: ${snapshot.startPoints.length}'),
+          const Icon(Icons.palette_outlined, size: 18),
+          const SizedBox(width: 6),
+          Switch.adaptive(
+            value: isColoredMode,
+            onChanged: onColoredModeChanged,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          const Spacer(),
+          const Icon(Icons.line_weight, size: 18),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 180,
+            child: Slider(
+              value: sliderValue,
+              min: minThicknessScale,
+              max: maxThicknessScale,
+              onChanged: onThicknessScaleChanged,
+            ),
+          ),
         ],
       ),
     );

@@ -6,9 +6,14 @@ import 'package:arrows_level_editor/features/arrows_view/arrows_view_board_paint
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_runtime_model.dart';
 
 class ArrowsViewBoardWidget extends StatefulWidget {
-  const ArrowsViewBoardWidget({super.key, required this.model});
+  const ArrowsViewBoardWidget({
+    super.key,
+    required this.model,
+    required this.renderSettings,
+  });
 
   final ArrowsViewRuntimeModel model;
+  final ArrowsViewRenderSettings renderSettings;
 
   @override
   State<ArrowsViewBoardWidget> createState() => _ArrowsViewBoardWidgetState();
@@ -61,6 +66,7 @@ class _ArrowsViewBoardWidgetState extends State<ArrowsViewBoardWidget> {
                       model: widget.model,
                       scale: _scale,
                       offset: _offset,
+                      settings: widget.renderSettings,
                     ),
                     size: Size.infinite,
                   ),

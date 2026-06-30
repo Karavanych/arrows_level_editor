@@ -4,11 +4,22 @@ import 'package:flutter/material.dart';
 
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_runtime_model.dart';
 
+class ArrowsViewRenderSettings {
+  const ArrowsViewRenderSettings({
+    required this.isColored,
+    required this.thicknessScale,
+  });
+
+  final bool isColored;
+  final double thicknessScale;
+}
+
 class ArrowsViewBoardPainter extends CustomPainter {
   const ArrowsViewBoardPainter({
     required this.model,
     required this.scale,
     required this.offset,
+    required this.settings,
   });
 
   static const double _outerPadding = 24;
@@ -26,6 +37,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
   final ArrowsViewRuntimeModel model;
   final double scale;
   final Offset offset;
+  final ArrowsViewRenderSettings settings;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -77,16 +89,22 @@ class ArrowsViewBoardPainter extends CustomPainter {
   }
 
   void _paintPaths(Canvas canvas, ArrowsViewBoardLayout layout) {
-    final strokeWidth = _scaled(_baseLineWidth, layout);
-    final arrowLength = _scaled(_baseArrowLength, layout);
-    final arrowHalfWidth = _scaled(_baseArrowHalfWidth, layout);
-    final arrowTipForwardOffset = _scaled(_baseArrowTipForwardOffset, layout);
+    final strokeWidth =
+        _scaled(_baseLineWidth, layout) * settings.thicknessScale;
+    final arrowLength =
+        _scaled(_baseArrowLength, layout) * settings.thicknessScale;
+    final arrowHalfWidth =
+        _scaled(_baseArrowHalfWidth, layout) * settings.thicknessScale;
+    final arrowTipForwardOffset =
+        _scaled(_baseArrowTipForwardOffset, layout) * settings.thicknessScale;
 
     for (final path in model.paths) {
       if (path.points.length < 2) {
         continue;
       }
-      final color = Color(path.colorValue);
+      final color = settings.isColored
+          ? Color(path.colorValue)
+          : const Color(0xFF222222);
       final linePaint = Paint()
         ..color = color
         ..style = PaintingStyle.stroke
@@ -154,7 +172,9 @@ class ArrowsViewBoardPainter extends CustomPainter {
   bool shouldRepaint(covariant ArrowsViewBoardPainter oldDelegate) {
     return oldDelegate.model != model ||
         oldDelegate.scale != scale ||
-        oldDelegate.offset != offset;
+        oldDelegate.offset != offset ||
+        oldDelegate.settings.isColored != settings.isColored ||
+        oldDelegate.settings.thicknessScale != settings.thicknessScale;
   }
 }
 
