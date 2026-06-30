@@ -18,6 +18,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
   static const double _baseSupportRadius = 3.2;
   static const double _baseArrowLength = _baseLineWidth * 2.4;
   static const double _baseArrowHalfWidth = _baseLineWidth * 1.1;
+  static const double _baseArrowTipForwardOffset = _baseLineWidth * 1.3;
   static const double _inactiveCellScale = 0.9;
   static const bool _showInactiveCells = false;
   static const bool _showSupportPoints = false;
@@ -79,6 +80,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
     final strokeWidth = _scaled(_baseLineWidth, layout);
     final arrowLength = _scaled(_baseArrowLength, layout);
     final arrowHalfWidth = _scaled(_baseArrowHalfWidth, layout);
+    final arrowTipForwardOffset = _scaled(_baseArrowTipForwardOffset, layout);
 
     for (final path in model.paths) {
       if (path.points.length < 2) {
@@ -109,7 +111,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
         path.headPose.position.dy,
       );
       final direction = _normalize(path.headPose.direction);
-      final tip = headCenter + direction * (strokeWidth * 0.55);
+      final tip = headCenter + direction * arrowTipForwardOffset;
       final baseCenter = tip - direction * arrowLength;
       final perpendicular = Offset(-direction.dy, direction.dx);
       final left = baseCenter + perpendicular * arrowHalfWidth;
