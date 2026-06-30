@@ -54,6 +54,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
   static const bool _showSupportPoints = false;
   static const double _exportPadding = 24;
   static const double _successExitExtraDistanceFactor = 2.8;
+  static const double _uniformTravelSpeedBoost = 1.8;
 
   final ArrowsViewRuntimeModel model;
   final double scale;
@@ -301,14 +302,8 @@ class ArrowsViewBoardPainter extends CustomPainter {
     if (launchedAt == null) {
       return null;
     }
-    final flightMs = frame.flightDuration.inMilliseconds;
-    if (flightMs <= 0) {
-      return null;
-    }
-    final progress = ((frame.elapsed - launchedAt).inMilliseconds / flightMs)
-        .toDouble();
-    final effectiveProgress = (progress * frame.flightSpeed).clamp(0.0, 1.0);
-    if (effectiveProgress >= 1.0) {
+    final elapsedSinceLaunchMs = (frame.elapsed - launchedAt).inMilliseconds;
+    if (elapsedSinceLaunchMs <= 0) {
       return null;
     }
 
@@ -320,7 +315,17 @@ class ArrowsViewBoardPainter extends CustomPainter {
       arrowLength: arrowLength,
       arrowTipForwardOffset: arrowTipForwardOffset,
     );
-    final travel = successTravelDistance * effectiveProgress;
+    final travelSpeedPerMs = _linearTravelSpeedPerMs(
+      frame: frame,
+      layout: layout,
+    );
+    if (travelSpeedPerMs <= 0) {
+      return null;
+    }
+    final travel = elapsedSinceLaunchMs * travelSpeedPerMs;
+    if (travel >= successTravelDistance) {
+      return null;
+    }
     final extendedPolyline = List<Offset>.from(basePolyline)
       ..add(head + direction * successTravelDistance);
 
@@ -340,6 +345,24 @@ class ArrowsViewBoardPainter extends CustomPainter {
       headPosition: headPose.position,
       headDirection: headPose.direction,
     );
+  }
+
+  double _linearTravelSpeedPerMs({
+    required ArrowsViewAnimationFrame frame,
+    required ArrowsViewBoardLayout layout,
+  }) {
+    final flightMs = frame.flightDuration.inMilliseconds;
+    if (flightMs <= 0) {
+      return 0;
+    }
+    // Shared distance/time baseline for all arrows => uniform visible speed.
+    final referenceDistance =
+        _maxPointSpacing *
+        _successExitExtraDistanceFactor *
+        _uniformTravelSpeedBoost;
+    final baseSpeedPerMs = referenceDistance / flightMs;
+    final speedFactor = frame.flightSpeed <= 0 ? 1.0 : frame.flightSpeed;
+    return baseSpeedPerMs * speedFactor;
   }
 
   double _distanceToExitBounds(Offset start, Offset direction, Rect bounds) {

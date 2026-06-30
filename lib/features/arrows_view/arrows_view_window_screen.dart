@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -15,6 +16,7 @@ import 'package:arrows_level_editor/features/arrows_view/arrows_view_export_serv
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_level_snapshot.dart';
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_path_reconstructor.dart';
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_runtime_model.dart';
+import 'package:arrows_level_editor/features/arrows_view/arrows_view_settings_persistence.dart';
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_window_state_manager.dart';
 
 class ArrowsViewWindowScreen extends StatefulWidget {
@@ -62,6 +64,9 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
     text: '1024',
   );
   final ArrowsViewExportService _exportService = ArrowsViewExportService();
+  final ArrowsViewSettingsPersistence _settingsPersistence =
+      ArrowsViewSettingsPersistence();
+  Timer? _settingsSaveDebounce;
 
   double _clampThicknessScale(double value) {
     return value.clamp(_minThicknessScale, _maxThicknessScale).toDouble();
@@ -78,12 +83,23 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
         _animationElapsed = elapsed;
       });
     });
+    _animationIntervalController.addListener(_scheduleSettingsSave);
+    _flightSpeedController.addListener(_scheduleSettingsSave);
+    _exportWidthController.addListener(_scheduleSettingsSave);
+    _exportHeightController.addListener(_scheduleSettingsSave);
     _buildRuntimeModel();
+    unawaited(_restorePersistedSettings());
     _setupWindowState();
   }
 
   @override
   void dispose() {
+    _settingsSaveDebounce?.cancel();
+    unawaited(_saveSettingsNow());
+    _animationIntervalController.removeListener(_scheduleSettingsSave);
+    _flightSpeedController.removeListener(_scheduleSettingsSave);
+    _exportWidthController.removeListener(_scheduleSettingsSave);
+    _exportHeightController.removeListener(_scheduleSettingsSave);
     _animationTicker.dispose();
     _flightSpeedController.dispose();
     _animationIntervalController.dispose();
@@ -100,6 +116,113 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
       return;
     }
     _windowStateManager = manager;
+  }
+
+  Future<void> _restorePersistedSettings() async {
+    final loaded = await _settingsPersistence.load(
+      defaultIsColoredMode: true,
+      defaultThicknessScale: _defaultThicknessScale,
+      minThicknessScale: _minThicknessScale,
+      maxThicknessScale: _maxThicknessScale,
+      defaultBackgroundColorHexArgb: _toHexArgb(Colors.transparent),
+      defaultExportWidthText: '1024',
+      defaultExportHeightText: '1024',
+      defaultAnimationIntervalText: '0.25',
+      defaultFlightSpeedText: '2',
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isColoredMode = loaded.isColoredMode;
+      _thicknessScale = _clampThicknessScale(loaded.thicknessScale);
+      _backgroundColor = _fromHexArgbOrDefault(
+        loaded.backgroundColorHexArgb,
+        fallback: Colors.transparent,
+      );
+    });
+    _setControllerText(_exportWidthController, loaded.exportWidthText);
+    _setControllerText(_exportHeightController, loaded.exportHeightText);
+    _setControllerText(
+      _animationIntervalController,
+      loaded.animationIntervalText,
+    );
+    _setControllerText(_flightSpeedController, loaded.flightSpeedText);
+  }
+
+  void _setControllerText(TextEditingController controller, String value) {
+    if (controller.text == value) {
+      return;
+    }
+    controller.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+  }
+
+  void _scheduleSettingsSave() {
+    _settingsSaveDebounce?.cancel();
+    _settingsSaveDebounce = Timer(const Duration(milliseconds: 250), () {
+      unawaited(_saveSettingsNow());
+    });
+  }
+
+  Future<void> _saveSettingsNow() async {
+    try {
+      await _settingsPersistence.save(
+        ArrowsViewPersistedSettings(
+          isColoredMode: _isColoredMode,
+          thicknessScale: _clampThicknessScale(_thicknessScale),
+          backgroundColorHexArgb: _toHexArgb(_backgroundColor),
+          exportWidthText: _validatedPositiveIntText(
+            _exportWidthController.text,
+            fallback: '1024',
+          ),
+          exportHeightText: _validatedPositiveIntText(
+            _exportHeightController.text,
+            fallback: '1024',
+          ),
+          animationIntervalText: _validatedPositiveDoubleText(
+            _animationIntervalController.text,
+            fallback: '0.25',
+          ),
+          flightSpeedText: _validatedPositiveDoubleText(
+            _flightSpeedController.text,
+            fallback: '2',
+          ),
+        ),
+      );
+    } catch (_) {
+      // Keep ArrowsView usable even when preferences are unavailable.
+    }
+  }
+
+  String _validatedPositiveIntText(String raw, {required String fallback}) {
+    final parsed = int.tryParse(raw);
+    if (parsed == null || parsed <= 0) {
+      return fallback;
+    }
+    return parsed.toString();
+  }
+
+  String _validatedPositiveDoubleText(String raw, {required String fallback}) {
+    final parsed = double.tryParse(raw);
+    if (parsed == null || parsed <= 0) {
+      return fallback;
+    }
+    return raw;
+  }
+
+  String _toHexArgb(Color color) {
+    return color.toARGB32().toRadixString(16).padLeft(8, '0');
+  }
+
+  Color _fromHexArgbOrDefault(String raw, {required Color fallback}) {
+    final parsed = int.tryParse(raw, radix: 16);
+    if (parsed == null) {
+      return fallback;
+    }
+    return Color(parsed);
   }
 
   void _buildRuntimeModel() {
@@ -165,6 +288,7 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
     setState(() {
       _backgroundColor = selected;
     });
+    _scheduleSettingsSave();
   }
 
   Future<void> _exportPng() async {
@@ -696,11 +820,13 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
               setState(() {
                 _isColoredMode = value;
               });
+              _scheduleSettingsSave();
             },
             onThicknessScaleChanged: (value) {
               setState(() {
                 _thicknessScale = _clampThicknessScale(value);
               });
+              _scheduleSettingsSave();
             },
             backgroundColor: _backgroundColor,
             onBackgroundColorTap: _openBackgroundColorEditor,
