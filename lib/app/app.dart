@@ -3,9 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:arrows_level_editor/app/window_state_manager.dart';
 
 class ArrowsLevelEditorApp extends StatefulWidget {
-  const ArrowsLevelEditorApp({super.key, this.windowStateManager});
+  const ArrowsLevelEditorApp({
+    super.key,
+    this.windowStateManager,
+    this.home = const EditorScreen(),
+    this.title = 'Arrows Level Editor',
+  });
 
   final WindowStateManager? windowStateManager;
+  final Widget home;
+  final String title;
 
   @override
   State<ArrowsLevelEditorApp> createState() => _ArrowsLevelEditorAppState();
@@ -21,13 +28,13 @@ class _ArrowsLevelEditorAppState extends State<ArrowsLevelEditorApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Arrows Level Editor',
+      title: widget.title,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
-      home: const EditorScreen(),
+      home: widget.home,
     );
   }
 }

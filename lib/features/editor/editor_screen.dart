@@ -7,6 +7,8 @@ import 'package:arrows_level_editor/features/editor/state/editor_controller.dart
 import 'package:arrows_level_editor/features/editor/validation/editor_check_preview_simulation.dart';
 import 'package:arrows_level_editor/features/editor/validation/editor_save_validation.dart';
 import 'package:arrows_level_editor/features/editor/widgets/editor_grid_view.dart';
+import 'package:arrows_level_editor/features/arrows_view/arrows_view_level_snapshot.dart';
+import 'package:arrows_level_editor/features/arrows_view/arrows_view_window_launcher.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter/material.dart';
@@ -256,7 +258,8 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  bool _isPackFilePath(String path) => path.toLowerCase().endsWith('.alevelpack');
+  bool _isPackFilePath(String path) =>
+      path.toLowerCase().endsWith('.alevelpack');
 
   Future<void> _handleSave() async {
     if (_isBusy) {
@@ -336,6 +339,29 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
+  Future<void> _handleOpenArrowsView() async {
+    if (_isBusy) {
+      return;
+    }
+    final state = _controller.state;
+    final stateSnapshot = state.copyWith(
+      cells: state.cells.map((cell) => cell.copyWith()).toList(growable: false),
+      paletteColors: List<Color>.from(state.paletteColors),
+    );
+    final levelSnapshot = ArrowsViewLevelSnapshot.fromEditorState(
+      levelId: _controller.currentLevelId,
+      state: stateSnapshot,
+    );
+    try {
+      await ArrowsViewWindowLauncher.open(levelSnapshot);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Не удалось открыть Arrows View: $error');
+    }
+  }
+
   Future<bool> _runCheckLevelValidationFlow() async {
     var validation = _controller.validateCurrentLevelBeforeSave();
 
@@ -400,7 +426,8 @@ class _EditorScreenState extends State<EditorScreen> {
         }
         final shouldAddStarts = await _askYesCancel(
           title: 'Отсутствуют стартовые точки линий',
-          message: 'Поставить стартовые точки автоматически для линий без старта?',
+          message:
+              'Поставить стартовые точки автоматически для линий без старта?',
         );
         if (shouldAddStarts != true) {
           return false;
@@ -414,10 +441,12 @@ class _EditorScreenState extends State<EditorScreen> {
       return false;
     }
 
-    final reconstructionProblems =
-        _controller.validateCurrentLevelPathReconstruction();
+    final reconstructionProblems = _controller
+        .validateCurrentLevelPathReconstruction();
     if (reconstructionProblems.isNotEmpty) {
-      final cells = reconstructionProblems.expand((it) => it.cellIndices).toSet();
+      final cells = reconstructionProblems
+          .expand((it) => it.cellIndices)
+          .toSet();
       await _blinkProblemCells(cells);
       if (!mounted) {
         return false;
@@ -550,7 +579,8 @@ class _EditorScreenState extends State<EditorScreen> {
                               return FilledButton(
                                 onPressed: () async {
                                   final outcome = await pendingRun;
-                                  if (!dialogContext.mounted || outcome == null) {
+                                  if (!dialogContext.mounted ||
+                                      outcome == null) {
                                     return;
                                   }
                                   Navigator.of(dialogContext).pop(outcome);
@@ -732,7 +762,8 @@ class _EditorScreenState extends State<EditorScreen> {
       return;
     }
 
-    final paths = result?.files
+    final paths =
+        result?.files
             .map((file) => file.path)
             .whereType<String>()
             .where((path) => path.isNotEmpty && _isImagePath(path))
@@ -746,7 +777,9 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) {
         return;
       }
-      _showErrorSnackBar('Не выбрано ни одного поддерживаемого файла изображения.');
+      _showErrorSnackBar(
+        'Не выбрано ни одного поддерживаемого файла изображения.',
+      );
       return;
     }
 
@@ -765,7 +798,9 @@ class _EditorScreenState extends State<EditorScreen> {
       return;
     }
     if (_referenceImagePaths.isEmpty) {
-      _showErrorSnackBar('Сначала добавьте хотя бы одно референсное изображение.');
+      _showErrorSnackBar(
+        'Сначала добавьте хотя бы одно референсное изображение.',
+      );
       return;
     }
     final width = int.tryParse(_widthController.text);
@@ -861,7 +896,10 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<void> _applyPaletteEditorColor() async {
     final index = _editingPaletteIndex;
     final color = _paletteEditorColor;
-    if (index == null || color == null || _isPaletteEditorColorReserved || _isBusy) {
+    if (index == null ||
+        color == null ||
+        _isPaletteEditorColorReserved ||
+        _isBusy) {
       return;
     }
     setState(() {
@@ -930,7 +968,10 @@ class _EditorScreenState extends State<EditorScreen> {
     const panelWidth = 380.0;
     const panelHeight = 510.0;
     final maxX = (viewportSize.width - panelWidth).clamp(0.0, double.infinity);
-    final maxY = (viewportSize.height - panelHeight).clamp(0.0, double.infinity);
+    final maxY = (viewportSize.height - panelHeight).clamp(
+      0.0,
+      double.infinity,
+    );
     final clampedOffset = Offset(
       _paletteEditorOffset.dx.clamp(0.0, maxX),
       _paletteEditorOffset.dy.clamp(0.0, maxY),
@@ -968,7 +1009,10 @@ class _EditorScreenState extends State<EditorScreen> {
                 });
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: const BoxDecoration(
                   border: Border(bottom: BorderSide(color: Colors.black12)),
                 ),
@@ -1000,7 +1044,9 @@ class _EditorScreenState extends State<EditorScreen> {
                         onPressed: _togglePaletteEyedropper,
                         icon: Icon(
                           Icons.colorize,
-                          color: _isPaletteEyedropperActive ? Colors.blue : null,
+                          color: _isPaletteEyedropperActive
+                              ? Colors.blue
+                              : null,
                         ),
                         label: Text(
                           _isPaletteEyedropperActive
@@ -1047,10 +1093,9 @@ class _EditorScreenState extends State<EditorScreen> {
                       ),
                       const Spacer(),
                       FilledButton(
-                        onPressed:
-                            _isBusy || _isPaletteEditorColorReserved
-                                ? null
-                                : _applyPaletteEditorColor,
+                        onPressed: _isBusy || _isPaletteEditorColorReserved
+                            ? null
+                            : _applyPaletteEditorColor,
                         child: const Text('Применить'),
                       ),
                     ],
@@ -1304,100 +1349,135 @@ class _EditorScreenState extends State<EditorScreen> {
                     return Stack(
                       children: [
                         Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                  Container(
-                    width: 280,
-                    padding: const EdgeInsets.all(16),
-                    decoration: const BoxDecoration(
-                      border: Border(right: BorderSide(color: Colors.black12)),
-                    ),
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Arrows Level Editor',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 12),
-                          Center(
-                            child: FilledButton(
-                              onPressed: _isBusy ? null : _handleCheckLevel,
-                              child: const Text('Check Level'),
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 280,
+                              padding: const EdgeInsets.all(16),
+                              decoration: const BoxDecoration(
+                                border: Border(
+                                  right: BorderSide(color: Colors.black12),
+                                ),
+                              ),
+                              child: SingleChildScrollView(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Arrows Level Editor',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.titleLarge,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: FilledButton(
+                                            onPressed: _isBusy
+                                                ? null
+                                                : _handleCheckLevel,
+                                            child: const Text(
+                                              'Check Level',
+                                              maxLines: 1,
+                                              softWrap: false,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: OutlinedButton(
+                                            onPressed: _isBusy
+                                                ? null
+                                                : _handleOpenArrowsView,
+                                            child: const Text(
+                                              'ArrowsView',
+                                              maxLines: 1,
+                                              softWrap: false,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 16),
+                                    _buildDimensionInputs(),
+                                    const SizedBox(height: 20),
+                                    Text(
+                                      'Tool',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.titleMedium,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    _buildToolSelector(state),
+                                    const SizedBox(height: 12),
+                                    _buildBrushModeSelector(state),
+                                    const SizedBox(height: 20),
+                                    Text(
+                                      'Color Palette',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.titleMedium,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    _buildColorPalette(state),
+                                    const SizedBox(height: 20),
+                                    _buildReferenceImagesSection(),
+                                  ],
+                                ),
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 16),
-                          _buildDimensionInputs(),
-                          const SizedBox(height: 20),
-                          Text(
-                            'Tool',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 8),
-                          _buildToolSelector(state),
-                          const SizedBox(height: 12),
-                          _buildBrushModeSelector(state),
-                          const SizedBox(height: 20),
-                          Text(
-                            'Color Palette',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 8),
-                          _buildColorPalette(state),
-                          const SizedBox(height: 20),
-                          _buildReferenceImagesSection(),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Container(
-                      color: const Color(0xFFF5F5F5),
-                      child: Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: EditorGridView(
-                            state: state,
-                            onStrokeStart: _controller.beginStroke,
-                            onCellDrag: _controller.touchCell,
-                            onStrokeEnd: _controller.endStroke,
-                            isLineModeEnabled:
-                                _controller.isLineBrushModeEnabledForCurrentTool,
-                            onEraseStrokeStart: _controller.beginEraseStroke,
-                            onEraseCellDrag: _controller.eraseCell,
-                            onEraseStrokeEnd: _controller.endEraseStroke,
-                            onEditorInteractionStart: _onGridInteractionStart,
-                            onColorPick: _handleGridColorPick,
-                            isPaintColorPickEnabled:
-                                _isPaletteEyedropperActive ||
-                                _controller.brushApplicationMode !=
-                                    BrushApplicationMode.recolor,
-                            highlightedErrorCells: _isBlinkOn
-                                ? Set<int>.from(_highlightedErrorCells)
-                                : const <int>{},
-                            highlightedErrorColor: _activeBlinkColor,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  Container(
-                    width: 280,
-                    padding: const EdgeInsets.all(16),
-                    decoration: const BoxDecoration(
-                      border: Border(left: BorderSide(color: Colors.black12)),
-                    ),
-                    child: _buildRightPanel(state),
-                  ),
+                            Expanded(
+                              child: Container(
+                                color: const Color(0xFFF5F5F5),
+                                child: Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(20),
+                                    child: EditorGridView(
+                                      state: state,
+                                      onStrokeStart: _controller.beginStroke,
+                                      onCellDrag: _controller.touchCell,
+                                      onStrokeEnd: _controller.endStroke,
+                                      isLineModeEnabled: _controller
+                                          .isLineBrushModeEnabledForCurrentTool,
+                                      onEraseStrokeStart:
+                                          _controller.beginEraseStroke,
+                                      onEraseCellDrag: _controller.eraseCell,
+                                      onEraseStrokeEnd:
+                                          _controller.endEraseStroke,
+                                      onEditorInteractionStart:
+                                          _onGridInteractionStart,
+                                      onColorPick: _handleGridColorPick,
+                                      isPaintColorPickEnabled:
+                                          _isPaletteEyedropperActive ||
+                                          _controller.brushApplicationMode !=
+                                              BrushApplicationMode.recolor,
+                                      highlightedErrorCells: _isBlinkOn
+                                          ? Set<int>.from(
+                                              _highlightedErrorCells,
+                                            )
+                                          : const <int>{},
+                                      highlightedErrorColor: _activeBlinkColor,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Container(
+                              width: 280,
+                              padding: const EdgeInsets.all(16),
+                              decoration: const BoxDecoration(
+                                border: Border(
+                                  left: BorderSide(color: Colors.black12),
+                                ),
+                              ),
+                              child: _buildRightPanel(state),
+                            ),
                           ],
                         ),
                         if (_isPaletteEditorVisible)
                           _buildFloatingPaletteEditor(
-                            Size(
-                              constraints.maxWidth,
-                              constraints.maxHeight,
-                            ),
+                            Size(constraints.maxWidth, constraints.maxHeight),
                           ),
                       ],
                     );
@@ -1474,10 +1554,7 @@ class _EditorScreenState extends State<EditorScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Apply Mode',
-          style: Theme.of(context).textTheme.labelLarge,
-        ),
+        Text('Apply Mode', style: Theme.of(context).textTheme.labelLarge),
         const SizedBox(height: 6),
         SegmentedButton<BrushApplicationMode>(
           segments: [
@@ -1625,11 +1702,7 @@ class _EditorScreenState extends State<EditorScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: const [
-                Icon(
-                  Icons.file_upload_outlined,
-                  size: 28,
-                  color: Colors.grey,
-                ),
+                Icon(Icons.file_upload_outlined, size: 28, color: Colors.grey),
                 SizedBox(height: 6),
                 Text('Drag & drop images here'),
               ],
@@ -1641,72 +1714,77 @@ class _EditorScreenState extends State<EditorScreen> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _referenceImagePaths.map((path) {
-              final fileName = path.split(Platform.pathSeparator).last;
-              return Container(
-                width: 80,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade300),
-                  borderRadius: BorderRadius.circular(10),
-                  color: Colors.white,
-                ),
-                padding: const EdgeInsets.all(6),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Stack(
-                      clipBehavior: Clip.none,
+            children: _referenceImagePaths
+                .map((path) {
+                  final fileName = path.split(Platform.pathSeparator).last;
+                  return Container(
+                    width: 80,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(10),
+                      color: Colors.white,
+                    ),
+                    padding: const EdgeInsets.all(6),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        SizedBox(
-                          width: 64,
-                          height: 64,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.file(
-                              File(path),
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) => Container(
-                                color: Colors.grey.shade200,
-                                alignment: Alignment.center,
-                                child: const Icon(Icons.broken_image_outlined),
+                        Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            SizedBox(
+                              width: 64,
+                              height: 64,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.file(
+                                  File(path),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      Container(
+                                        color: Colors.grey.shade200,
+                                        alignment: Alignment.center,
+                                        child: const Icon(
+                                          Icons.broken_image_outlined,
+                                        ),
+                                      ),
+                                ),
                               ),
                             ),
-                          ),
+                            Positioned(
+                              top: -8,
+                              right: -10,
+                              child: IconButton(
+                                style: IconButton.styleFrom(
+                                  backgroundColor: Colors.black54,
+                                  minimumSize: const Size(22, 22),
+                                  padding: EdgeInsets.zero,
+                                ),
+                                icon: const Icon(
+                                  Icons.close,
+                                  size: 13,
+                                  color: Colors.white,
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _referenceImagePaths.remove(path);
+                                  });
+                                },
+                              ),
+                            ),
+                          ],
                         ),
-                        Positioned(
-                          top: -8,
-                          right: -10,
-                          child: IconButton(
-                            style: IconButton.styleFrom(
-                              backgroundColor: Colors.black54,
-                              minimumSize: const Size(22, 22),
-                              padding: EdgeInsets.zero,
-                            ),
-                            icon: const Icon(
-                              Icons.close,
-                              size: 13,
-                              color: Colors.white,
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _referenceImagePaths.remove(path);
-                              });
-                            },
-                          ),
+                        const SizedBox(height: 6),
+                        Text(
+                          fileName,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      fileName,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              );
-            }).toList(growable: false),
+                  );
+                })
+                .toList(growable: false),
           ),
       ],
     );
@@ -1848,17 +1926,15 @@ class _EditorScreenState extends State<EditorScreen> {
             dense: true,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
-              side: BorderSide(color: selected ? Colors.indigo : Colors.black12),
+              side: BorderSide(
+                color: selected ? Colors.indigo : Colors.black12,
+              ),
             ),
             tileColor: selected ? Colors.indigo.withValues(alpha: 0.08) : null,
             title: Row(
               children: [
                 if (_controller.isLevelChecked(level.id)) ...[
-                  const Icon(
-                    Icons.check_circle,
-                    size: 18,
-                    color: Colors.green,
-                  ),
+                  const Icon(Icons.check_circle, size: 18, color: Colors.green),
                   const SizedBox(width: 6),
                 ],
                 Expanded(child: Text('$levelSizePrefix ${level.id}')),
@@ -1869,7 +1945,9 @@ class _EditorScreenState extends State<EditorScreen> {
               children: [
                 IconButton(
                   tooltip: 'Delete level',
-                  onPressed: _isBusy ? null : () => _handleDeleteLevel(level.id),
+                  onPressed: _isBusy
+                      ? null
+                      : () => _handleDeleteLevel(level.id),
                   icon: const Icon(Icons.delete_outline),
                 ),
                 ReorderableDragStartListener(
