@@ -1,8 +1,12 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'package:flutter/services.dart';
 
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_board_painter.dart';
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_board_widget.dart';
+import 'package:arrows_level_editor/features/arrows_view/arrows_view_export_service.dart';
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_level_snapshot.dart';
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_path_reconstructor.dart';
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_runtime_model.dart';
@@ -29,6 +33,14 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
   double _thicknessScale = _defaultThicknessScale;
   Color _backgroundColor = Colors.transparent;
   bool _isBackgroundColorDialogOpen = false;
+  bool _isExporting = false;
+  final TextEditingController _exportWidthController = TextEditingController(
+    text: '1024',
+  );
+  final TextEditingController _exportHeightController = TextEditingController(
+    text: '1024',
+  );
+  final ArrowsViewExportService _exportService = ArrowsViewExportService();
 
   double _clampThicknessScale(double value) {
     return value.clamp(_minThicknessScale, _maxThicknessScale).toDouble();
@@ -44,6 +56,8 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
   @override
   void dispose() {
     _windowStateManager?.dispose();
+    _exportWidthController.dispose();
+    _exportHeightController.dispose();
     super.dispose();
   }
 
@@ -121,6 +135,78 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
     });
   }
 
+  Future<void> _exportPng() async {
+    final runtimeModel = _runtimeModel;
+    if (runtimeModel == null) {
+      _showErrorSnackBar('Nothing to export: path reconstruction failed.');
+      return;
+    }
+
+    final width = int.tryParse(_exportWidthController.text);
+    final height = int.tryParse(_exportHeightController.text);
+    if (width == null || height == null || width <= 0 || height <= 0) {
+      _showErrorSnackBar('Please enter valid positive export dimensions.');
+      return;
+    }
+    if (width > 8192 || height > 8192) {
+      _showErrorSnackBar('Export dimensions are too large (max 8192).');
+      return;
+    }
+
+    setState(() {
+      _isExporting = true;
+    });
+    try {
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      final imageSize = Size(width.toDouble(), height.toDouble());
+      final painter = ArrowsViewBoardPainter(
+        model: runtimeModel,
+        scale: 1,
+        offset: Offset.zero,
+        settings: ArrowsViewRenderSettings(
+          isColored: _isColoredMode,
+          thicknessScale: _clampThicknessScale(_thicknessScale),
+          backgroundColor: _backgroundColor,
+        ),
+      );
+      painter.paint(canvas, imageSize);
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(width, height);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      if (byteData == null) {
+        throw StateError('Failed to encode PNG bytes.');
+      }
+
+      final file = await _exportService.savePng(byteData.buffer.asUint8List());
+      await _exportService.revealExportFile(file);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Saved PNG: ${file.path}')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorSnackBar('Failed to export PNG: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isExporting = false;
+        });
+      }
+    }
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final runtimeModel = _runtimeModel;
@@ -147,6 +233,9 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
             backgroundColor: _backgroundColor,
             onBackgroundColorTap: _openBackgroundColorEditor,
             onBackgroundColorDoubleTap: _openBackgroundColorEditor,
+            exportWidthController: _exportWidthController,
+            exportHeightController: _exportHeightController,
+            onSavePressed: _isExporting ? null : _exportPng,
           ),
           Expanded(
             child: Padding(
@@ -182,6 +271,9 @@ class _ArrowsViewControlStrip extends StatelessWidget {
     required this.backgroundColor,
     required this.onBackgroundColorTap,
     required this.onBackgroundColorDoubleTap,
+    required this.exportWidthController,
+    required this.exportHeightController,
+    required this.onSavePressed,
   });
 
   final bool isColoredMode;
@@ -193,6 +285,9 @@ class _ArrowsViewControlStrip extends StatelessWidget {
   final Color backgroundColor;
   final VoidCallback onBackgroundColorTap;
   final VoidCallback onBackgroundColorDoubleTap;
+  final TextEditingController exportWidthController;
+  final TextEditingController exportHeightController;
+  final VoidCallback? onSavePressed;
 
   @override
   Widget build(BuildContext context) {
@@ -232,7 +327,47 @@ class _ArrowsViewControlStrip extends StatelessWidget {
             onDoubleTap: onBackgroundColorDoubleTap,
           ),
           const Spacer(),
+          _ExportDimensionField(
+            controller: exportWidthController,
+            icon: Icons.straighten,
+          ),
+          const SizedBox(width: 6),
+          _ExportDimensionField(
+            controller: exportHeightController,
+            icon: Icons.height,
+          ),
+          const SizedBox(width: 8),
+          FilledButton(onPressed: onSavePressed, child: const Text('Save')),
         ],
+      ),
+    );
+  }
+}
+
+class _ExportDimensionField extends StatelessWidget {
+  const _ExportDimensionField({required this.controller, required this.icon});
+
+  final TextEditingController controller;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 104,
+      child: TextField(
+        controller: controller,
+        keyboardType: TextInputType.number,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        textAlign: TextAlign.center,
+        decoration: InputDecoration(
+          isDense: true,
+          prefixIcon: Icon(icon, size: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 8,
+          ),
+          border: const OutlineInputBorder(),
+        ),
       ),
     );
   }
