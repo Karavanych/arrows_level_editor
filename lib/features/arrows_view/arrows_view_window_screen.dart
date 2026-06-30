@@ -149,7 +149,7 @@ class _ArrowsViewControlStrip extends StatelessWidget {
             onChanged: onColoredModeChanged,
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
-          const Spacer(),
+          const SizedBox(width: 14),
           const Icon(Icons.line_weight, size: 18),
           const SizedBox(width: 8),
           SizedBox(
@@ -161,6 +161,7 @@ class _ArrowsViewControlStrip extends StatelessWidget {
               onChanged: onThicknessScaleChanged,
             ),
           ),
+          const Spacer(),
         ],
       ),
     );
