@@ -55,7 +55,7 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
   final Map<int, Duration> _launchedAt = <int, Duration>{};
   Set<int> _pendingPathIndices = <int>{};
   int _animationRunId = 0;
-  static const Duration _flightDuration = Duration(milliseconds: 2800);
+  static const Duration _flightDuration = Duration(milliseconds: 8400);
   static const int _videoFps = 30;
   final TextEditingController _exportWidthController = TextEditingController(
     text: '1024',

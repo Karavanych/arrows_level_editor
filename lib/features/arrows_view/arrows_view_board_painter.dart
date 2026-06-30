@@ -54,6 +54,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
   static const bool _showSupportPoints = false;
   static const double _exportPadding = 24;
   static const double _successExitExtraDistanceFactor = 2.8;
+  static const double _successTravelDistanceMultiplier = 3.0;
   static const double _uniformTravelSpeedBoost = 1.8;
 
   final ArrowsViewRuntimeModel model;
@@ -359,6 +360,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
     final referenceDistance =
         _maxPointSpacing *
         _successExitExtraDistanceFactor *
+        _successTravelDistanceMultiplier *
         _uniformTravelSpeedBoost;
     final baseSpeedPerMs = referenceDistance / flightMs;
     final speedFactor = frame.flightSpeed <= 0 ? 1.0 : frame.flightSpeed;
@@ -387,11 +389,13 @@ class ArrowsViewBoardPainter extends CustomPainter {
     required double arrowTipForwardOffset,
   }) {
     final distanceToBounds = _distanceToExitBounds(head, direction, bounds);
-    return distanceToBounds +
+    final baseDistance =
+        distanceToBounds +
         arrowLength +
         arrowTipForwardOffset +
         strokeWidth +
         _maxPointSpacing * _successExitExtraDistanceFactor;
+    return baseDistance * _successTravelDistanceMultiplier;
   }
 
   double _polylineLength(List<Offset> polyline) {
