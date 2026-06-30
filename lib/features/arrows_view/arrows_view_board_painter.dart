@@ -5,7 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_runtime_model.dart';
 
 class ArrowsViewBoardPainter extends CustomPainter {
-  const ArrowsViewBoardPainter({required this.model});
+  const ArrowsViewBoardPainter({
+    required this.model,
+    required this.scale,
+    required this.offset,
+  });
 
   static const double _outerPadding = 24;
   static const double _maxPointSpacing = 84;
@@ -17,6 +21,8 @@ class ArrowsViewBoardPainter extends CustomPainter {
   static const double _inactiveCellScale = 0.9;
 
   final ArrowsViewRuntimeModel model;
+  final double scale;
+  final Offset offset;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -26,18 +32,23 @@ class ArrowsViewBoardPainter extends CustomPainter {
       return;
     }
 
-    final layout = _BoardLayout.compute(
+    final layout = ArrowsViewBoardLayout.compute(
       size: size,
       width: model.width,
       height: model.height,
     );
 
+    canvas
+      ..save()
+      ..translate(offset.dx, offset.dy)
+      ..scale(scale);
     _paintInactiveCells(canvas, layout);
     _paintPaths(canvas, layout);
     _paintSupportPoints(canvas, layout);
+    canvas.restore();
   }
 
-  void _paintInactiveCells(Canvas canvas, _BoardLayout layout) {
+  void _paintInactiveCells(Canvas canvas, ArrowsViewBoardLayout layout) {
     final inactivePaint = Paint()..color = const Color(0xFFFFFFFF);
     final borderPaint = Paint()
       ..color = const Color(0x11000000)
@@ -58,7 +69,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
     }
   }
 
-  void _paintPaths(Canvas canvas, _BoardLayout layout) {
+  void _paintPaths(Canvas canvas, ArrowsViewBoardLayout layout) {
     final strokeWidth = _scaled(_baseLineWidth, layout);
     final arrowLength = _scaled(_baseArrowLength, layout);
     final arrowHalfWidth = _scaled(_baseArrowHalfWidth, layout);
@@ -107,7 +118,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
     }
   }
 
-  void _paintSupportPoints(Canvas canvas, _BoardLayout layout) {
+  void _paintSupportPoints(Canvas canvas, ArrowsViewBoardLayout layout) {
     final radius = _scaled(_baseSupportRadius, layout);
     final supportPaint = Paint()..color = const Color(0xFF111111);
     for (final point in model.supportPoints) {
@@ -127,23 +138,30 @@ class ArrowsViewBoardPainter extends CustomPainter {
     return Offset(vector.dx / length, vector.dy / length);
   }
 
-  double _scaled(double base, _BoardLayout layout) {
+  double _scaled(double base, ArrowsViewBoardLayout layout) {
     return base * (layout.pointSpacing / _maxPointSpacing).clamp(0.6, 1.4);
   }
 
   @override
   bool shouldRepaint(covariant ArrowsViewBoardPainter oldDelegate) {
-    return oldDelegate.model != model;
+    return oldDelegate.model != model ||
+        oldDelegate.scale != scale ||
+        oldDelegate.offset != offset;
   }
 }
 
-class _BoardLayout {
-  const _BoardLayout({required this.origin, required this.pointSpacing});
+class ArrowsViewBoardLayout {
+  const ArrowsViewBoardLayout({
+    required this.origin,
+    required this.pointSpacing,
+    required this.boardBounds,
+  });
 
   final Offset origin;
   final double pointSpacing;
+  final Rect boardBounds;
 
-  factory _BoardLayout.compute({
+  factory ArrowsViewBoardLayout.compute({
     required Size size,
     required int width,
     required int height,
@@ -178,7 +196,11 @@ class _BoardLayout {
       (size.width - boardWidth) * 0.5,
       (size.height - boardHeight) * 0.5,
     );
-    return _BoardLayout(origin: origin, pointSpacing: spacing);
+    return ArrowsViewBoardLayout(
+      origin: origin,
+      pointSpacing: spacing,
+      boardBounds: Rect.fromLTWH(origin.dx, origin.dy, boardWidth, boardHeight),
+    );
   }
 
   Offset pointToCanvas(double gridX, double gridY) {
