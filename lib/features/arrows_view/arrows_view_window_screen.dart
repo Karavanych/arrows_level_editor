@@ -18,7 +18,7 @@ class ArrowsViewWindowScreen extends StatefulWidget {
 
 class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
   static const double _minThicknessScale = 0.6;
-  static const double _maxThicknessScale = 1.8;
+  static const double _maxThicknessScale = 3.6;
   static const double _defaultThicknessScale = 1.0;
 
   ArrowsViewWindowStateManager? _windowStateManager;
