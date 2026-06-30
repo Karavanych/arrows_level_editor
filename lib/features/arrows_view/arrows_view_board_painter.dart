@@ -93,12 +93,14 @@ class ArrowsViewBoardPainter extends CustomPainter {
     required Size size,
     required ArrowsViewRuntimeModel model,
     required ArrowsViewRenderSettings settings,
+    ArrowsViewAnimationFrame? animationFrame,
   }) {
     final painter = ArrowsViewBoardPainter(
       model: model,
       scale: 1,
       offset: Offset.zero,
       settings: settings,
+      animationFrame: animationFrame,
     );
     final bgPaint = Paint()..color = settings.backgroundColor;
     canvas.drawRect(Offset.zero & size, bgPaint);

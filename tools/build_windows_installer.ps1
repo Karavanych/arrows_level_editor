@@ -48,6 +48,15 @@ if (-not $releaseDir) {
   throw "Could not find Release output containing $binaryName.exe. Checked: $($candidateRelPaths -join ', ')"
 }
 
+$bundledFfmpegSource = Join-Path $repoRoot 'third_party\ffmpeg\windows\ffmpeg.exe'
+if (-not (Test-Path $bundledFfmpegSource)) {
+  throw "Bundled ffmpeg not found at $bundledFfmpegSource. Place ffmpeg.exe there before packaging."
+}
+
+$bundledFfmpegTarget = Join-Path $releaseDir 'ffmpeg.exe'
+Copy-Item -Path $bundledFfmpegSource -Destination $bundledFfmpegTarget -Force
+Write-Host "Bundled ffmpeg copied to $bundledFfmpegTarget"
+
 $distDir = Join-Path $repoRoot 'dist\windows'
 if (-not (Test-Path $distDir)) {
   New-Item -ItemType Directory -Path $distDir | Out-Null

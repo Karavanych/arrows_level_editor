@@ -27,11 +27,27 @@ class ArrowsViewExportService {
     return 'arrows_view_$yyyy$mm${dd}_$hh$min$ss.png';
   }
 
+  String buildVideoFileName([DateTime? now]) {
+    final value = now ?? DateTime.now();
+    final yyyy = value.year.toString().padLeft(4, '0');
+    final mm = value.month.toString().padLeft(2, '0');
+    final dd = value.day.toString().padLeft(2, '0');
+    final hh = value.hour.toString().padLeft(2, '0');
+    final min = value.minute.toString().padLeft(2, '0');
+    final ss = value.second.toString().padLeft(2, '0');
+    return 'arrows_view_$yyyy$mm${dd}_$hh$min$ss.mp4';
+  }
+
   Future<File> savePng(Uint8List bytes) async {
     final directory = await getDefaultExportDirectory();
     final file = File(p.join(directory.path, buildFileName()));
     await file.writeAsBytes(bytes, flush: true);
     return file;
+  }
+
+  Future<File> createVideoOutputFile() async {
+    final directory = await getDefaultExportDirectory();
+    return File(p.join(directory.path, buildVideoFileName()));
   }
 
   Future<void> revealExportFile(File file) async {

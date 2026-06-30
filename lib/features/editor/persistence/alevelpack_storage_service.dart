@@ -20,10 +20,15 @@ class ALevelPackStorageService {
   Future<File> getDefaultPackFile() async {
     final appSupportDir = await getApplicationSupportDirectory();
     final packsDir = Directory(p.join(appSupportDir.path, 'packs'));
+    final defaultFile = File(p.join(packsDir.path, _defaultPackFileName));
+    if (await defaultFile.exists()) {
+      return defaultFile;
+    }
+
     if (!await packsDir.exists()) {
       await packsDir.create(recursive: true);
     }
-    return File(p.join(packsDir.path, _defaultPackFileName));
+    return defaultFile;
   }
 
   Future<ALevelPackDocument> loadOrCreateDefaultPack({
@@ -164,9 +169,7 @@ class ALevelPackStorageService {
     }
     final content = entry.readBytes();
     if (content == null) {
-      throw FormatException(
-        'Не удалось прочитать байты записи архива: $path',
-      );
+      throw FormatException('Не удалось прочитать байты записи архива: $path');
     }
     return utf8.decode(content);
   }
@@ -218,10 +221,12 @@ class ALevelPackStorageService {
           pixel.g.toInt(),
           pixel.b.toInt(),
         );
-      if (pixel.a.toInt() == 0) {
-        boardCells.add(const ALevelBoardCell(isInactive: false, isEmpty: true));
-        continue;
-      }
+        if (pixel.a.toInt() == 0) {
+          boardCells.add(
+            const ALevelBoardCell(isInactive: false, isEmpty: true),
+          );
+          continue;
+        }
         final rgb = color.toARGB32() & 0x00FFFFFF;
         if (rgb == 0x00FFFFFF) {
           boardCells.add(const ALevelBoardCell(isInactive: true));
