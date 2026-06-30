@@ -10,10 +10,12 @@ class ArrowsViewBoardWidget extends StatefulWidget {
     super.key,
     required this.model,
     required this.renderSettings,
+    this.animationFrame,
   });
 
   final ArrowsViewRuntimeModel model;
   final ArrowsViewRenderSettings renderSettings;
+  final ArrowsViewAnimationFrame? animationFrame;
 
   @override
   State<ArrowsViewBoardWidget> createState() => _ArrowsViewBoardWidgetState();
@@ -67,6 +69,7 @@ class _ArrowsViewBoardWidgetState extends State<ArrowsViewBoardWidget> {
                       scale: _scale,
                       offset: _offset,
                       settings: widget.renderSettings,
+                      animationFrame: widget.animationFrame,
                     ),
                     size: Size.infinite,
                   ),

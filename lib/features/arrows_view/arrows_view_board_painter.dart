@@ -16,12 +16,29 @@ class ArrowsViewRenderSettings {
   final Color backgroundColor;
 }
 
+class ArrowsViewAnimationFrame {
+  const ArrowsViewAnimationFrame({
+    required this.pendingPathIndices,
+    required this.launchedAt,
+    required this.elapsed,
+    required this.flightDuration,
+    required this.flightSpeed,
+  });
+
+  final Set<int> pendingPathIndices;
+  final Map<int, Duration> launchedAt;
+  final Duration elapsed;
+  final Duration flightDuration;
+  final double flightSpeed;
+}
+
 class ArrowsViewBoardPainter extends CustomPainter {
   const ArrowsViewBoardPainter({
     required this.model,
     required this.scale,
     required this.offset,
     required this.settings,
+    this.animationFrame,
   });
 
   static const double _outerPadding = 24;
@@ -41,6 +58,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
   final double scale;
   final Offset offset;
   final ArrowsViewRenderSettings settings;
+  final ArrowsViewAnimationFrame? animationFrame;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -151,8 +169,20 @@ class ArrowsViewBoardPainter extends CustomPainter {
     final arrowTipForwardOffset =
         _scaled(_baseArrowTipForwardOffset, layout) * settings.thicknessScale;
 
-    for (final path in model.paths) {
+    for (var pathIndex = 0; pathIndex < model.paths.length; pathIndex += 1) {
+      final path = model.paths[pathIndex];
       if (path.points.length < 2) {
+        continue;
+      }
+      final window = _animationWindowForPath(
+        pathIndex: pathIndex,
+        path: path,
+        layout: layout,
+        strokeWidth: strokeWidth,
+        arrowLength: arrowLength,
+        arrowTipForwardOffset: arrowTipForwardOffset,
+      );
+      if (window == null) {
         continue;
       }
       final color = settings.isColored
@@ -165,26 +195,28 @@ class ArrowsViewBoardPainter extends CustomPainter {
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round;
 
-      final linePath = Path();
-      final first = layout.pointToCanvas(
-        path.points.first.dx,
-        path.points.first.dy,
-      );
-      linePath.moveTo(first.dx, first.dy);
-      for (var i = 1; i < path.points.length; i += 1) {
-        final next = layout.pointToCanvas(path.points[i].dx, path.points[i].dy);
+      if (window.visiblePolyline.length < 2) {
+        continue;
+      }
+
+      final linePath = Path()
+        ..moveTo(
+          window.visiblePolyline.first.dx,
+          window.visiblePolyline.first.dy,
+        );
+      for (var i = 1; i < window.visiblePolyline.length; i += 1) {
+        final next = window.visiblePolyline[i];
         linePath.lineTo(next.dx, next.dy);
       }
       canvas.drawPath(linePath, linePaint);
 
-      final headCenter = layout.pointToCanvas(
-        path.headPose.position.dx,
-        path.headPose.position.dy,
+      final tip =
+          window.headPosition + window.headDirection * arrowTipForwardOffset;
+      final baseCenter = tip - window.headDirection * arrowLength;
+      final perpendicular = Offset(
+        -window.headDirection.dy,
+        window.headDirection.dx,
       );
-      final direction = _normalize(path.headPose.direction);
-      final tip = headCenter + direction * arrowTipForwardOffset;
-      final baseCenter = tip - direction * arrowLength;
-      final perpendicular = Offset(-direction.dy, direction.dx);
       final left = baseCenter + perpendicular * arrowHalfWidth;
       final right = baseCenter - perpendicular * arrowHalfWidth;
 
@@ -228,7 +260,188 @@ class ArrowsViewBoardPainter extends CustomPainter {
         oldDelegate.offset != offset ||
         oldDelegate.settings.isColored != settings.isColored ||
         oldDelegate.settings.thicknessScale != settings.thicknessScale ||
-        oldDelegate.settings.backgroundColor != settings.backgroundColor;
+        oldDelegate.settings.backgroundColor != settings.backgroundColor ||
+        oldDelegate.animationFrame != animationFrame;
+  }
+
+  _PathRenderWindow? _animationWindowForPath({
+    required int pathIndex,
+    required ArrowsViewRenderPath path,
+    required ArrowsViewBoardLayout layout,
+    required double strokeWidth,
+    required double arrowLength,
+    required double arrowTipForwardOffset,
+  }) {
+    final basePolyline = path.points
+        .map((point) => layout.pointToCanvas(point.dx, point.dy))
+        .toList(growable: true);
+    if (basePolyline.length < 2) {
+      return null;
+    }
+    final basePathLength = _polylineLength(basePolyline);
+    if (basePathLength <= 0) {
+      return null;
+    }
+
+    final direction = _normalize(path.headPose.direction);
+    final head = basePolyline.last;
+    final frame = animationFrame;
+    if (frame == null || frame.pendingPathIndices.contains(pathIndex)) {
+      return _PathRenderWindow(
+        visiblePolyline: basePolyline,
+        headPosition: head,
+        headDirection: direction,
+      );
+    }
+
+    final launchedAt = frame.launchedAt[pathIndex];
+    if (launchedAt == null) {
+      return null;
+    }
+    final flightMs = frame.flightDuration.inMilliseconds;
+    if (flightMs <= 0) {
+      return null;
+    }
+    final progress = ((frame.elapsed - launchedAt).inMilliseconds / flightMs)
+        .toDouble();
+    final effectiveProgress = (progress * frame.flightSpeed).clamp(0.0, 1.0);
+    if (effectiveProgress >= 1.0) {
+      return null;
+    }
+
+    final successTravelDistance = _successTravelDistance(
+      head: head,
+      direction: direction,
+      bounds: layout.boardBounds,
+      strokeWidth: strokeWidth,
+      arrowLength: arrowLength,
+      arrowTipForwardOffset: arrowTipForwardOffset,
+    );
+    final travel = successTravelDistance * effectiveProgress;
+    final extendedPolyline = List<Offset>.from(basePolyline)
+      ..add(head + direction * successTravelDistance);
+
+    final windowStart = travel;
+    final windowEnd = travel + basePathLength;
+    final visiblePolyline = _visiblePolylineInRange(
+      polyline: extendedPolyline,
+      rangeStart: windowStart,
+      rangeEnd: windowEnd,
+    );
+    if (visiblePolyline.length < 2) {
+      return null;
+    }
+    final headPose = _samplePoseAtDistance(extendedPolyline, windowEnd);
+    return _PathRenderWindow(
+      visiblePolyline: visiblePolyline,
+      headPosition: headPose.position,
+      headDirection: headPose.direction,
+    );
+  }
+
+  double _distanceToExitBounds(Offset start, Offset direction, Rect bounds) {
+    if (direction.dx > 0.001) {
+      return bounds.right - start.dx;
+    }
+    if (direction.dx < -0.001) {
+      return start.dx - bounds.left;
+    }
+    if (direction.dy > 0.001) {
+      return bounds.bottom - start.dy;
+    }
+    return start.dy - bounds.top;
+  }
+
+  double _successTravelDistance({
+    required Offset head,
+    required Offset direction,
+    required Rect bounds,
+    required double strokeWidth,
+    required double arrowLength,
+    required double arrowTipForwardOffset,
+  }) {
+    final distanceToBounds = _distanceToExitBounds(head, direction, bounds);
+    return distanceToBounds +
+        arrowLength +
+        arrowTipForwardOffset +
+        strokeWidth +
+        _maxPointSpacing * 1.2;
+  }
+
+  double _polylineLength(List<Offset> polyline) {
+    var length = 0.0;
+    for (var i = 1; i < polyline.length; i += 1) {
+      length += (polyline[i] - polyline[i - 1]).distance;
+    }
+    return length;
+  }
+
+  List<Offset> _visiblePolylineInRange({
+    required List<Offset> polyline,
+    required double rangeStart,
+    required double rangeEnd,
+  }) {
+    final result = <Offset>[];
+    var accumulated = 0.0;
+    for (var i = 1; i < polyline.length; i += 1) {
+      final a = polyline[i - 1];
+      final b = polyline[i];
+      final segmentLength = (b - a).distance;
+      if (segmentLength <= 0.0001) {
+        continue;
+      }
+      final segmentStart = accumulated;
+      final segmentEnd = accumulated + segmentLength;
+      final visibleStart = math.max(segmentStart, rangeStart);
+      final visibleEnd = math.min(segmentEnd, rangeEnd);
+      if (visibleEnd > visibleStart) {
+        final t0 = (visibleStart - segmentStart) / segmentLength;
+        final t1 = (visibleEnd - segmentStart) / segmentLength;
+        final p0 = Offset.lerp(a, b, t0)!;
+        final p1 = Offset.lerp(a, b, t1)!;
+        if (result.isEmpty || (result.last - p0).distance > 0.001) {
+          result.add(p0);
+        }
+        if ((result.last - p1).distance > 0.001) {
+          result.add(p1);
+        }
+      }
+      accumulated = segmentEnd;
+    }
+    return result;
+  }
+
+  _SampledPose _samplePoseAtDistance(List<Offset> polyline, double distance) {
+    if (polyline.length < 2) {
+      return const _SampledPose(position: Offset.zero, direction: Offset(1, 0));
+    }
+    if (distance <= 0) {
+      final direction = _normalize(polyline[1] - polyline[0]);
+      return _SampledPose(position: polyline.first, direction: direction);
+    }
+
+    var accumulated = 0.0;
+    for (var i = 1; i < polyline.length; i += 1) {
+      final a = polyline[i - 1];
+      final b = polyline[i];
+      final segment = b - a;
+      final segmentLength = segment.distance;
+      if (segmentLength <= 0.0001) {
+        continue;
+      }
+      final nextAccumulated = accumulated + segmentLength;
+      if (distance <= nextAccumulated) {
+        final t = ((distance - accumulated) / segmentLength).clamp(0.0, 1.0);
+        final position = Offset.lerp(a, b, t)!;
+        final direction = _normalize(segment);
+        return _SampledPose(position: position, direction: direction);
+      }
+      accumulated = nextAccumulated;
+    }
+
+    final last = polyline.last;
+    final prev = polyline[polyline.length - 2];
+    return _SampledPose(position: last, direction: _normalize(last - prev));
   }
 
   Rect? _computeArtworkBounds(ArrowsViewBoardLayout layout) {
@@ -359,4 +572,23 @@ class ArrowsViewBoardLayout {
       boardBounds: Rect.fromLTWH(origin.dx, origin.dy, boardWidth, boardHeight),
     );
   }
+}
+
+class _PathRenderWindow {
+  const _PathRenderWindow({
+    required this.visiblePolyline,
+    required this.headPosition,
+    required this.headDirection,
+  });
+
+  final List<Offset> visiblePolyline;
+  final Offset headPosition;
+  final Offset headDirection;
+}
+
+class _SampledPose {
+  const _SampledPose({required this.position, required this.direction});
+
+  final Offset position;
+  final Offset direction;
 }

@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_board_painter.dart';
 import 'package:arrows_level_editor/features/arrows_view/arrows_view_board_widget.dart';
@@ -21,7 +22,8 @@ class ArrowsViewWindowScreen extends StatefulWidget {
   State<ArrowsViewWindowScreen> createState() => _ArrowsViewWindowScreenState();
 }
 
-class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
+class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
+    with SingleTickerProviderStateMixin {
   static const double _minThicknessScale = 0.6;
   static const double _maxThicknessScale = 3.6;
   static const double _defaultThicknessScale = 1.0;
@@ -34,6 +36,18 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
   Color _backgroundColor = Colors.transparent;
   bool _isBackgroundColorDialogOpen = false;
   bool _isExporting = false;
+  bool _isAnimating = false;
+  final TextEditingController _flightSpeedController = TextEditingController(
+    text: '1.0',
+  );
+  final TextEditingController _animationIntervalController =
+      TextEditingController(text: '0.25');
+  late final Ticker _animationTicker;
+  Duration _animationElapsed = Duration.zero;
+  final Map<int, Duration> _launchedAt = <int, Duration>{};
+  Set<int> _pendingPathIndices = <int>{};
+  int _animationRunId = 0;
+  static const Duration _flightDuration = Duration(milliseconds: 1300);
   final TextEditingController _exportWidthController = TextEditingController(
     text: '1024',
   );
@@ -49,12 +63,23 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
   @override
   void initState() {
     super.initState();
+    _animationTicker = createTicker((elapsed) {
+      if (!_isAnimating) {
+        return;
+      }
+      setState(() {
+        _animationElapsed = elapsed;
+      });
+    });
     _buildRuntimeModel();
     _setupWindowState();
   }
 
   @override
   void dispose() {
+    _animationTicker.dispose();
+    _flightSpeedController.dispose();
+    _animationIntervalController.dispose();
     _windowStateManager?.dispose();
     _exportWidthController.dispose();
     _exportHeightController.dispose();
@@ -200,6 +225,114 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
     }
   }
 
+  Future<void> _startAnimation() async {
+    final model = _runtimeModel;
+    if (model == null || _isAnimating) {
+      return;
+    }
+    _animationRunId += 1;
+    final runId = _animationRunId;
+    setState(() {
+      _isAnimating = true;
+      _animationElapsed = Duration.zero;
+      _launchedAt.clear();
+      _pendingPathIndices = Set<int>.from(
+        List<int>.generate(model.paths.length, (index) => index),
+      );
+    });
+    _animationTicker.start();
+
+    while (mounted && _isAnimating && _pendingPathIndices.isNotEmpty) {
+      final releasableIndex = _findNextReleasablePathIndex(model);
+      if (releasableIndex == null) {
+        break;
+      }
+      setState(() {
+        _pendingPathIndices.remove(releasableIndex);
+        _launchedAt[releasableIndex] = _animationElapsed;
+      });
+      final interval = _readLaunchInterval();
+      await Future<void>.delayed(interval);
+      if (!mounted || !_isAnimating || runId != _animationRunId) {
+        return;
+      }
+    }
+
+    await Future<void>.delayed(const Duration(seconds: 3));
+    if (!mounted || runId != _animationRunId) {
+      return;
+    }
+    _restoreStaticPreview();
+  }
+
+  Duration _readLaunchInterval() {
+    final raw = double.tryParse(_animationIntervalController.text);
+    if (raw == null || raw <= 0) {
+      return const Duration(milliseconds: 250);
+    }
+    return Duration(milliseconds: (raw * 1000).round());
+  }
+
+  double _readFlightSpeed() {
+    final raw = double.tryParse(_flightSpeedController.text);
+    if (raw == null || raw <= 0) {
+      return 1.0;
+    }
+    return raw;
+  }
+
+  void _stopAnimationAndRestore() {
+    _animationRunId += 1;
+    _restoreStaticPreview();
+  }
+
+  int? _findNextReleasablePathIndex(ArrowsViewRuntimeModel model) {
+    for (var i = 0; i < model.paths.length; i += 1) {
+      if (!_pendingPathIndices.contains(i)) {
+        continue;
+      }
+      if (_isPathReleasable(model, i)) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  bool _isPathReleasable(ArrowsViewRuntimeModel model, int candidateIndex) {
+    final candidate = model.paths[candidateIndex];
+    final dx = candidate.headPose.direction.dx.round();
+    final dy = candidate.headPose.direction.dy.round();
+    var x = candidate.headPose.position.dx.round() + dx;
+    var y = candidate.headPose.position.dy.round() + dy;
+
+    while (x >= 0 && x < model.width && y >= 0 && y < model.height) {
+      for (final otherIndex in _pendingPathIndices) {
+        if (otherIndex == candidateIndex) {
+          continue;
+        }
+        final points = model.paths[otherIndex].points;
+        for (final point in points) {
+          if (point.dx.round() == x && point.dy.round() == y) {
+            return false;
+          }
+        }
+      }
+      x += dx;
+      y += dy;
+    }
+    return true;
+  }
+
+  void _restoreStaticPreview() {
+    _animationTicker.stop();
+    setState(() {
+      _isAnimating = false;
+      _animationElapsed = Duration.zero;
+      _launchedAt.clear();
+      _pendingPathIndices = <int>{};
+    });
+  }
+
   void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.red),
@@ -232,6 +365,11 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
             backgroundColor: _backgroundColor,
             onBackgroundColorTap: _openBackgroundColorEditor,
             onBackgroundColorDoubleTap: _openBackgroundColorEditor,
+            flightSpeedController: _flightSpeedController,
+            animationIntervalController: _animationIntervalController,
+            isAnimating: _isAnimating,
+            onAnimatePressed: _startAnimation,
+            onStopPressed: _stopAnimationAndRestore,
             exportWidthController: _exportWidthController,
             exportHeightController: _exportHeightController,
             onSavePressed: _isExporting ? null : _exportPng,
@@ -250,6 +388,15 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen> {
                         thicknessScale: _clampThicknessScale(_thicknessScale),
                         backgroundColor: _backgroundColor,
                       ),
+                      animationFrame: _isAnimating
+                          ? ArrowsViewAnimationFrame(
+                              pendingPathIndices: _pendingPathIndices,
+                              launchedAt: _launchedAt,
+                              elapsed: _animationElapsed,
+                              flightDuration: _flightDuration,
+                              flightSpeed: _readFlightSpeed(),
+                            )
+                          : null,
                     ),
             ),
           ),
@@ -270,6 +417,11 @@ class _ArrowsViewControlStrip extends StatelessWidget {
     required this.backgroundColor,
     required this.onBackgroundColorTap,
     required this.onBackgroundColorDoubleTap,
+    required this.flightSpeedController,
+    required this.animationIntervalController,
+    required this.isAnimating,
+    required this.onAnimatePressed,
+    required this.onStopPressed,
     required this.exportWidthController,
     required this.exportHeightController,
     required this.onSavePressed,
@@ -284,6 +436,11 @@ class _ArrowsViewControlStrip extends StatelessWidget {
   final Color backgroundColor;
   final VoidCallback onBackgroundColorTap;
   final VoidCallback onBackgroundColorDoubleTap;
+  final TextEditingController flightSpeedController;
+  final TextEditingController animationIntervalController;
+  final bool isAnimating;
+  final VoidCallback onAnimatePressed;
+  final VoidCallback onStopPressed;
   final TextEditingController exportWidthController;
   final TextEditingController exportHeightController;
   final VoidCallback? onSavePressed;
@@ -326,6 +483,19 @@ class _ArrowsViewControlStrip extends StatelessWidget {
             onDoubleTap: onBackgroundColorDoubleTap,
           ),
           const Spacer(),
+          _AnimationValueField(
+            controller: flightSpeedController,
+            icon: Icons.speed,
+            width: 92,
+          ),
+          const SizedBox(width: 6),
+          _IntervalField(controller: animationIntervalController),
+          const SizedBox(width: 6),
+          FilledButton(
+            onPressed: isAnimating ? onStopPressed : onAnimatePressed,
+            child: Text(isAnimating ? 'Stop' : 'Animate'),
+          ),
+          const SizedBox(width: 8),
           _ExportDimensionField(
             controller: exportWidthController,
             icon: Icons.straighten,
@@ -338,6 +508,65 @@ class _ArrowsViewControlStrip extends StatelessWidget {
           const SizedBox(width: 8),
           FilledButton(onPressed: onSavePressed, child: const Text('Save')),
         ],
+      ),
+    );
+  }
+}
+
+class _IntervalField extends StatelessWidget {
+  const _IntervalField({required this.controller});
+
+  final TextEditingController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 92,
+      child: TextField(
+        controller: controller,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+        textAlign: TextAlign.center,
+        decoration: const InputDecoration(
+          isDense: true,
+          prefixIcon: Icon(Icons.timer_outlined, size: 14),
+          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          border: OutlineInputBorder(),
+        ),
+      ),
+    );
+  }
+}
+
+class _AnimationValueField extends StatelessWidget {
+  const _AnimationValueField({
+    required this.controller,
+    required this.icon,
+    required this.width,
+  });
+
+  final TextEditingController controller;
+  final IconData icon;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: TextField(
+        controller: controller,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+        textAlign: TextAlign.center,
+        decoration: InputDecoration(
+          isDense: true,
+          prefixIcon: Icon(icon, size: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 8,
+          ),
+          border: const OutlineInputBorder(),
+        ),
       ),
     );
   }
