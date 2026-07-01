@@ -53,9 +53,8 @@ class ArrowsViewBoardPainter extends CustomPainter {
   static const bool _showInactiveCells = false;
   static const bool _showSupportPoints = false;
   static const double _exportPadding = 24;
-  static const double _successExitExtraDistanceFactor = 2.8;
-  static const double _successTravelDistanceMultiplier = 3.0;
-  static const double _uniformTravelSpeedBoost = 1.8;
+  static const double _offscreenCompletionMarginFactor = 0.30;
+  static const double _uniformTravelSpeedBoost = 57.6;
 
   final ArrowsViewRuntimeModel model;
   final double scale;
@@ -308,10 +307,12 @@ class ArrowsViewBoardPainter extends CustomPainter {
       return null;
     }
 
-    final successTravelDistance = _successTravelDistance(
+    final expandedBounds = _expandedAnimationBounds(layout.boardBounds);
+    final completionTravelDistance = _completionTravelDistance(
       head: head,
       direction: direction,
-      bounds: layout.boardBounds,
+      basePathLength: basePathLength,
+      expandedBounds: expandedBounds,
       strokeWidth: strokeWidth,
       arrowLength: arrowLength,
       arrowTipForwardOffset: arrowTipForwardOffset,
@@ -324,11 +325,8 @@ class ArrowsViewBoardPainter extends CustomPainter {
       return null;
     }
     final travel = elapsedSinceLaunchMs * travelSpeedPerMs;
-    if (travel >= successTravelDistance) {
-      return null;
-    }
     final extendedPolyline = List<Offset>.from(basePolyline)
-      ..add(head + direction * successTravelDistance);
+      ..add(head + direction * completionTravelDistance);
 
     final windowStart = travel;
     final windowEnd = travel + basePathLength;
@@ -338,6 +336,9 @@ class ArrowsViewBoardPainter extends CustomPainter {
       rangeEnd: windowEnd,
     );
     if (visiblePolyline.length < 2) {
+      return null;
+    }
+    if (_isPolylineOutsideBounds(visiblePolyline, expandedBounds)) {
       return null;
     }
     final headPose = _samplePoseAtDistance(extendedPolyline, windowEnd);
@@ -357,11 +358,7 @@ class ArrowsViewBoardPainter extends CustomPainter {
       return 0;
     }
     // Shared distance/time baseline for all arrows => uniform visible speed.
-    final referenceDistance =
-        _maxPointSpacing *
-        _successExitExtraDistanceFactor *
-        _successTravelDistanceMultiplier *
-        _uniformTravelSpeedBoost;
+    final referenceDistance = _maxPointSpacing * _uniformTravelSpeedBoost;
     final baseSpeedPerMs = referenceDistance / flightMs;
     final speedFactor = frame.flightSpeed <= 0 ? 1.0 : frame.flightSpeed;
     return baseSpeedPerMs * speedFactor;
@@ -369,33 +366,109 @@ class ArrowsViewBoardPainter extends CustomPainter {
 
   double _distanceToExitBounds(Offset start, Offset direction, Rect bounds) {
     if (direction.dx > 0.001) {
-      return bounds.right - start.dx;
+      return math.max(0.0, bounds.right - start.dx);
     }
     if (direction.dx < -0.001) {
-      return start.dx - bounds.left;
+      return math.max(0.0, start.dx - bounds.left);
     }
     if (direction.dy > 0.001) {
-      return bounds.bottom - start.dy;
+      return math.max(0.0, bounds.bottom - start.dy);
     }
-    return start.dy - bounds.top;
+    return math.max(0.0, start.dy - bounds.top);
   }
 
-  double _successTravelDistance({
+  Rect _expandedAnimationBounds(Rect boardBounds) {
+    return boardBounds.inflate(
+      math.max(boardBounds.width, boardBounds.height) *
+          _offscreenCompletionMarginFactor,
+    );
+  }
+
+  double _completionTravelDistance({
     required Offset head,
     required Offset direction,
-    required Rect bounds,
+    required double basePathLength,
+    required Rect expandedBounds,
     required double strokeWidth,
     required double arrowLength,
     required double arrowTipForwardOffset,
   }) {
-    final distanceToBounds = _distanceToExitBounds(head, direction, bounds);
-    final baseDistance =
-        distanceToBounds +
-        arrowLength +
-        arrowTipForwardOffset +
-        strokeWidth +
-        _maxPointSpacing * _successExitExtraDistanceFactor;
-    return baseDistance * _successTravelDistanceMultiplier;
+    final distanceToExpandedBounds = _distanceToExitBounds(
+      head,
+      direction,
+      expandedBounds,
+    );
+    final tailClearance = arrowLength + arrowTipForwardOffset + strokeWidth;
+    return distanceToExpandedBounds + basePathLength + tailClearance;
+  }
+
+  bool _isPolylineOutsideBounds(List<Offset> polyline, Rect bounds) {
+    if (polyline.isEmpty) {
+      return true;
+    }
+    var minX = polyline.first.dx;
+    var maxX = polyline.first.dx;
+    var minY = polyline.first.dy;
+    var maxY = polyline.first.dy;
+    for (var i = 1; i < polyline.length; i += 1) {
+      final point = polyline[i];
+      minX = math.min(minX, point.dx);
+      maxX = math.max(maxX, point.dx);
+      minY = math.min(minY, point.dy);
+      maxY = math.max(maxY, point.dy);
+    }
+    final polylineBounds = Rect.fromLTRB(minX, minY, maxX, maxY);
+    return !polylineBounds.overlaps(bounds);
+  }
+
+  static bool hasVisibleAnimatedPathsForExport({
+    required ArrowsViewRuntimeModel model,
+    required ArrowsViewAnimationFrame frame,
+    required ArrowsViewRenderSettings settings,
+  }) {
+    final painter = ArrowsViewBoardPainter(
+      model: model,
+      scale: 1,
+      offset: Offset.zero,
+      settings: settings,
+      animationFrame: frame,
+    );
+    final layout = ArrowsViewBoardLayout.exportCanonical(
+      width: model.width,
+      height: model.height,
+    );
+    final strokeWidth = painter._scaled(_baseLineWidth, layout) *
+        settings.thicknessScale;
+    final arrowLength = painter._scaled(_baseArrowLength, layout) *
+        settings.thicknessScale;
+    final arrowTipForwardOffset =
+        painter._scaled(_baseArrowTipForwardOffset, layout) *
+            settings.thicknessScale;
+
+    for (var pathIndex = 0; pathIndex < model.paths.length; pathIndex += 1) {
+      if (frame.pendingPathIndices.contains(pathIndex)) {
+        continue;
+      }
+      final path = model.paths[pathIndex];
+      if (path.points.length < 2) {
+        continue;
+      }
+      if (frame.launchedAt[pathIndex] == null) {
+        continue;
+      }
+      final window = painter._animationWindowForPath(
+        pathIndex: pathIndex,
+        path: path,
+        layout: layout,
+        strokeWidth: strokeWidth,
+        arrowLength: arrowLength,
+        arrowTipForwardOffset: arrowTipForwardOffset,
+      );
+      if (window != null) {
+        return true;
+      }
+    }
+    return false;
   }
 
   double _polylineLength(List<Offset> polyline) {

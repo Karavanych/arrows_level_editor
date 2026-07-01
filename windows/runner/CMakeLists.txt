@@ -38,3 +38,18 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+# Copy bundled ffmpeg next to the runner executable for local/debug runs.
+set(BUNDLED_FFMPEG_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/ffmpeg/windows/ffmpeg.exe")
+if(EXISTS "${BUNDLED_FFMPEG_SOURCE}")
+  add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${BUNDLED_FFMPEG_SOURCE}"
+      "$<TARGET_FILE_DIR:${BINARY_NAME}>/ffmpeg.exe"
+    VERBATIM)
+else()
+  message(WARNING
+    "Bundled ffmpeg not found at ${BUNDLED_FFMPEG_SOURCE}. "
+    "Video export on Windows requires this file.")
+endif()

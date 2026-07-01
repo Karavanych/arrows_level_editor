@@ -46,7 +46,7 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
   bool _videoStopRequested = false;
   bool _isAnimating = false;
   final TextEditingController _flightSpeedController = TextEditingController(
-    text: '2',
+    text: '1',
   );
   final TextEditingController _animationIntervalController =
       TextEditingController(text: '0.25');
@@ -441,6 +441,7 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
         }
 
         if (_isVideoAnimationCompleted(
+          runtimeModel: runtimeModel,
           elapsed: elapsed,
           hasBlockedPending: hasBlockedPending,
         )) {
@@ -475,8 +476,11 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
       if (!mounted) {
         return;
       }
+      final setupHint = error.platformLabel == 'Windows'
+          ? ' Put ffmpeg.exe into third_party/ffmpeg/windows/ffmpeg.exe and rebuild.'
+          : '';
       _showErrorSnackBar(
-        'Bundled ffmpeg not found (${error.platformLabel}). Expected: ${error.expectedPath}',
+        'Bundled ffmpeg not found (${error.platformLabel}). Expected: ${error.expectedPath}.$setupHint',
       );
     } on _BundledFfmpegLaunchException catch (error) {
       if (!mounted) {
@@ -650,6 +654,7 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
   }
 
   bool _isVideoAnimationCompleted({
+    required ArrowsViewRuntimeModel runtimeModel,
     required Duration elapsed,
     required bool hasBlockedPending,
   }) {
@@ -659,17 +664,23 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
     if (_launchedAt.isEmpty) {
       return hasBlockedPending || _pendingPathIndices.isEmpty;
     }
-    final speed = _readFlightSpeed();
-    final effectiveSpeed = speed <= 0 ? 1.0 : speed;
-    final perArrowDuration = Duration(
-      milliseconds: (_flightDuration.inMilliseconds / effectiveSpeed).ceil(),
+    final frame = ArrowsViewAnimationFrame(
+      pendingPathIndices: Set<int>.from(_pendingPathIndices),
+      launchedAt: Map<int, Duration>.from(_launchedAt),
+      elapsed: elapsed,
+      flightDuration: _flightDuration,
+      flightSpeed: _readFlightSpeed(),
     );
-    for (final launchAt in _launchedAt.values) {
-      if (elapsed < launchAt + perArrowDuration) {
-        return false;
-      }
-    }
-    return true;
+    final hasVisiblePaths = ArrowsViewBoardPainter.hasVisibleAnimatedPathsForExport(
+      model: runtimeModel,
+      frame: frame,
+      settings: ArrowsViewRenderSettings(
+        isColored: _isColoredMode,
+        thicknessScale: _clampThicknessScale(_thicknessScale),
+        backgroundColor: _opaqueVideoBackground(_backgroundColor),
+      ),
+    );
+    return !hasVisiblePaths;
   }
 
   Color _opaqueVideoBackground(Color base) {
@@ -732,7 +743,7 @@ class _ArrowsViewWindowScreenState extends State<ArrowsViewWindowScreen>
   double _readFlightSpeed() {
     final raw = double.tryParse(_flightSpeedController.text);
     if (raw == null || raw <= 0) {
-      return 2.0;
+      return 1.0;
     }
     return raw;
   }
