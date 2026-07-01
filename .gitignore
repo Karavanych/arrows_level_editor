@@ -46,3 +46,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local bundled ffmpeg binaries (do not commit)
+/third_party/ffmpeg/windows/ffmpeg.exe
