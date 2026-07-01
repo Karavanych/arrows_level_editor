@@ -304,7 +304,11 @@ class ArrowsViewBoardPainter extends CustomPainter {
     }
     final elapsedSinceLaunchMs = (frame.elapsed - launchedAt).inMilliseconds;
     if (elapsedSinceLaunchMs <= 0) {
-      return null;
+      return _PathRenderWindow(
+        visiblePolyline: basePolyline,
+        headPosition: head,
+        headDirection: direction,
+      );
     }
 
     final expandedBounds = _expandedAnimationBounds(layout.boardBounds);
